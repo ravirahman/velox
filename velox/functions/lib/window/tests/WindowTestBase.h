@@ -19,7 +19,7 @@
 
 namespace facebook::velox::window::test {
 
-enum class WindowStyle { kSort, kStreaming, kRandom };
+enum class WindowStyle { kSort, kStreaming, kHash, kRandom };
 
 /// Exhaustive set of window function over clauses using a combination of four
 /// columns. Columns c0 and c1 have input data meant to test partitioning
@@ -137,6 +137,13 @@ class WindowTestBase : public exec::test::OperatorTestBase {
   // This function is used to test the StreamingWindow. It will add the order by
   // action to ensure the data is ordered.
   QueryInfo buildStreamingWindowQuery(
+      const std::vector<RowVectorPtr>& input,
+      const std::string& function,
+      const std::string& overClause,
+      const std::string& frameClause);
+
+  // This function is used to test Window operator using HashTable based build.
+  QueryInfo buildHashWindowQuery(
       const std::vector<RowVectorPtr>& input,
       const std::string& function,
       const std::string& overClause,

@@ -918,6 +918,11 @@ RowComparator::RowComparator(
   }
 }
 
+RowComparator::RowComparator(
+    std::vector<std::pair<column_index_t, core::SortOrder>> keyInfo,
+    RowContainer* rowContainer)
+    : rowContainer_(rowContainer), keyInfo_(keyInfo) {}
+
 bool RowComparator::operator()(const char* lhs, const char* rhs) {
   if (lhs == rhs) {
     return false;

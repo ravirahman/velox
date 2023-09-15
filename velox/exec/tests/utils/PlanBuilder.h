@@ -731,6 +731,9 @@ class PlanBuilder {
   /// be already sorted on these.
   PlanBuilder& streamingWindow(const std::vector<std::string>& windowFunctions);
 
+  /// Adds WindowNode to compute window functions backed by HashTable.
+  PlanBuilder& hashWindow(const std::vector<std::string>& windowFunctions);
+
   /// Add a RowNumberNode to compute single row_number window function with an
   /// optional limit and no sorting.
   PlanBuilder& rowNumber(
@@ -864,7 +867,8 @@ class PlanBuilder {
   /// window functions.
   PlanBuilder& window(
       const std::vector<std::string>& windowFunctions,
-      bool inputSorted);
+      bool inputSorted,
+      bool hashWindowBuild);
 
  protected:
   core::PlanNodePtr planNode_;

@@ -366,19 +366,18 @@ if(${VELOX_ENABLE_GPU})
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-set(BOOST_INCLUDE_LIBRARIES
-    atomic
-    context
-    date_time
-    filesystem
-    program_options
-    regex
-    system
-    thread)
-
-set_source(Boost)
-resolve_dependency(Boost 1.66.0 COMPONENTS ${BOOST_INCLUDE_LIBRARIES})
+find_package(Boost 1.66.0 COMPONENTS
+atomic
+context
+date_time
+filesystem
+program_options
+regex
+system
+thread
+REQUIRED)
+message("Including boost headers: ${Boost_INCLUDE_DIRS}")
+include_directories("${Boost_INCLUDE_DIRS}")
 
 # Range-v3 will be enable when the codegen code actually lands keeping it here
 # for reference. find_package(range-v3)

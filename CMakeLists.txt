@@ -368,7 +368,6 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(BOOST_INCLUDE_LIBRARIES
-    headers
     atomic
     context
     date_time

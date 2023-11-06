@@ -383,7 +383,7 @@ include_directories("${Boost_INCLUDE_DIRS}")
 # for reference. find_package(range-v3)
 
 set_source(gflags)
-resolve_dependency(gflags COMPONENTS shared)
+resolve_dependency(gflags)
 if(NOT TARGET gflags::gflags)
   # This is a bit convoluted, but we want to be able to use gflags::gflags as a
   # target even when velox is built as a subproject which uses

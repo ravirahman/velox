@@ -10,7 +10,7 @@
 include(FindPackageHandleStandardArgs)
 include(SelectLibraryConfigurations)
 
-find_library(LZ4_LIBRARY_RELEASE lz4 PATHS $LZ4_LIBRARYDIR})
+find_library(LZ4_LIBRARY_RELEASE lz4 PATHS ${LZ4_LIBRARYDIR})
 find_library(LZ4_LIBRARY_DEBUG lz4d PATHS ${LZ4_LIBRARYDIR})
 
 find_path(LZ4_INCLUDE_DIR lz4.h PATHS ${LZ4_INCLUDEDIR})
@@ -20,8 +20,7 @@ select_library_configurations(LZ4)
 find_package_handle_standard_args(lz4 DEFAULT_MSG LZ4_LIBRARY LZ4_INCLUDE_DIR)
 
 mark_as_advanced(LZ4_LIBRARY LZ4_INCLUDE_DIR)
-
-get_filename_component(liblz4_ext ${LZ4_LIBRARY} EXT)
+cmake_path(GET LZ4_LIBRARY EXTENSION liblz4_ext)
 if(liblz4_ext STREQUAL ".a")
   set(liblz4_type STATIC)
 else()

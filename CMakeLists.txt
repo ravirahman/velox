@@ -438,8 +438,6 @@ if(NOT ${VELOX_BUILD_MINIMAL})
   endif()
 endif()
 
-# Forcing re2 to be bundled because the system version is not necessarrily backwards compatible
-set(ENV{re2_SOURCE} BUNDLED)
 set_source(re2)
 resolve_dependency(re2)
 

@@ -38,6 +38,7 @@ add_executable(
   CustomJoinTest.cpp
   EnforceSingleRowTest.cpp
   ExchangeClientTest.cpp
+  ExpandTest.cpp
   FilterProjectTest.cpp
   FunctionResolutionTest.cpp
   HashJoinBridgeTest.cpp
@@ -95,7 +96,8 @@ add_executable(
   PlanBuilderTest.cpp
   QueryAssertionsTest.cpp
   TaskTest.cpp
-  TreeOfLosersTest.cpp)
+  TreeOfLosersTest.cpp
+  PrestoQueryRunnerTest.cpp)
 
 add_test(
   NAME velox_exec_test
@@ -164,6 +166,8 @@ target_link_libraries(
   velox_type
   velox_vector
   velox_vector_fuzzer
+  velox_presto_serializer
+  velox_dwio_dwrf_writer
   Boost::atomic
   Boost::context
   Boost::date_time

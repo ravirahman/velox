@@ -238,7 +238,8 @@ if(VELOX_ENABLE_ABFS)
   if(AZURESDK_ROOT_DIR)
     list(APPEND CMAKE_PREFIX_PATH ${AZURESDK_ROOT_DIR})
   endif()
-  find_package(azure-storage-blobs-cpp CONFIG REQUIRED)
+  # files-datalake is built on blobs
+  find_package(azure-storage-files-datalake-cpp CONFIG REQUIRED)
   add_definitions(-DVELOX_ENABLE_ABFS)
 endif()
 
@@ -419,6 +420,11 @@ else()
 endif()
 resolve_dependency(glog)
 
+if(${VELOX_ENABLE_DUCKDB})
+  set_source(DuckDB)
+  resolve_dependency(DuckDB)
+endif()
+
 set_source(fmt)
 resolve_dependency(fmt)
 
@@ -477,6 +483,9 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
     message(
       FATAL_ERROR "VELOX requires gcc > 8. Found ${CMAKE_CXX_COMPILER_VERSION}")
   endif()
+
+  # Find Threads library
+  find_package(Threads REQUIRED)
 else()
   set(FILESYSTEM "")
 endif()
@@ -525,8 +534,6 @@ find_package(FLEX 2.5.13 REQUIRED)
 
 include_directories(SYSTEM velox)
 include_directories(SYSTEM velox/external)
-include_directories(SYSTEM velox/external/duckdb)
-include_directories(SYSTEM velox/external/duckdb/tpch/dbgen/include)
 
 # these were previously vendored in third-party/
 if(NOT VELOX_DISABLE_GOOGLETEST)
@@ -540,12 +547,15 @@ endif()
 set_source(xsimd)
 resolve_dependency(xsimd)
 
-if(VELOX_BUILD_TESTING)
+if(VELOX_BUILD_TESTING OR VELOX_BUILD_TEST_UTILS)
   set(cpr_SOURCE BUNDLED)
   resolve_dependency(cpr)
 endif()
 
-include(CTest) # include after project() but before add_subdirectory()
+if(VELOX_BUILD_TESTING)
+  set(BUILD_TESTING ON)
+  include(CTest) # include after project() but before add_subdirectory()
+endif()
 
 include_directories(.)
 

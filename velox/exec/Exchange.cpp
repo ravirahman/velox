@@ -109,8 +109,7 @@ RowVectorPtr Exchange::getOutput() {
   for (const auto& page : currentPages_) {
     rawInputBytes += page->size();
 
-    ByteStream inputStream;
-    page->prepareStreamForDeserialize(&inputStream);
+    auto inputStream = page->prepareStreamForDeserialize();
 
     while (!inputStream.atEnd()) {
       getSerde()->deserialize(
@@ -148,7 +147,7 @@ void Exchange::recordExchangeClientStats() {
 
   auto lockedStats = stats_.wlock();
   const auto exchangeClientStats = exchangeClient_->stats();
-  for (const auto& [name, value] : exchangeClient_->stats()) {
+  for (const auto& [name, value] : exchangeClientStats) {
     lockedStats->runtimeStats.erase(name);
     lockedStats->runtimeStats.insert({name, value});
   }

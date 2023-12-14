@@ -41,15 +41,15 @@ class UnsafeRowSerializerTest : public ::testing::Test,
     auto rowType = std::dynamic_pointer_cast<const RowType>(rowVector->type());
     auto serializer = serde_->createSerializer(rowType, numRows, arena.get());
 
-    serializer->append(rowVector, folly::Range(rows.data(), numRows));
+    Scratch scratch;
+    serializer->append(rowVector, folly::Range(rows.data(), numRows), scratch);
     auto size = serializer->maxSerializedSize();
     OStreamOutputStream out(output);
     serializer->flush(&out);
     ASSERT_EQ(size, output->tellp());
   }
 
-  std::unique_ptr<ByteStream> toByteStream(
-      const std::vector<std::string_view>& inputs) {
+  ByteInputStream toByteStream(const std::vector<std::string_view>& inputs) {
     std::vector<ByteRange> ranges;
     ranges.reserve(inputs.size());
 
@@ -59,9 +59,7 @@ class UnsafeRowSerializerTest : public ::testing::Test,
            (int32_t)input.length(),
            0});
     }
-    auto byteStream = std::make_unique<ByteStream>();
-    byteStream->resetInput(std::move(ranges));
-    return byteStream;
+    return ByteInputStream(std::move(ranges));
   }
 
   RowVectorPtr deserialize(
@@ -70,7 +68,7 @@ class UnsafeRowSerializerTest : public ::testing::Test,
     auto byteStream = toByteStream(input);
 
     RowVectorPtr result;
-    serde_->deserialize(byteStream.get(), pool_.get(), rowType, &result);
+    serde_->deserialize(&byteStream, pool_.get(), rowType, &result);
     return result;
   }
 
@@ -280,7 +278,8 @@ TEST_F(UnsafeRowSerializerTest, incompleteRow) {
   // Cut in the middle of the `size` integer.
   buffers = {{rawData, 2}};
   VELOX_ASSERT_RUNTIME_THROW(
-      testDeserialize(buffers, expected), "Reading past end of ByteStream");
+      testDeserialize(buffers, expected),
+      "Reading past end of ByteInputStream");
 }
 
 TEST_F(UnsafeRowSerializerTest, types) {
@@ -305,7 +304,6 @@ TEST_F(UnsafeRowSerializerTest, types) {
   VectorFuzzer::Options opts;
   opts.vectorSize = 5;
   opts.nullRatio = 0.1;
-  opts.containerHasNulls = false;
   opts.dictionaryHasNulls = false;
   opts.stringVariableLength = true;
   opts.stringLength = 20;
@@ -322,7 +320,7 @@ TEST_F(UnsafeRowSerializerTest, types) {
   SCOPED_TRACE(fmt::format("seed: {}", seed));
   VectorFuzzer fuzzer(opts, pool_.get(), seed);
 
-  auto data = fuzzer.fuzzRow(rowType);
+  auto data = fuzzer.fuzzInputRow(rowType);
   testRoundTrip(data);
 }
 

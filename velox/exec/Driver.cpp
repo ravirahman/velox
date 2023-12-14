@@ -23,7 +23,6 @@
 #include "velox/common/testutil/TestValue.h"
 #include "velox/common/time/Timer.h"
 #include "velox/exec/Operator.h"
-#include "velox/exec/OperatorUtils.h"
 #include "velox/exec/Task.h"
 
 using facebook::velox::common::testutil::TestValue;
@@ -131,9 +130,15 @@ std::optional<common::SpillConfig> DriverCtx::makeSpillConfig(
   if (task->spillDirectory().empty()) {
     return std::nullopt;
   }
+  common::GetSpillDirectoryPathCB getSpillDirPathCb =
+      [this]() -> const std::string& {
+    return this->task->getOrCreateSpillDirectory();
+  };
+  const auto& spillFilePrefix =
+      fmt::format("{}_{}_{}", pipelineId, driverId, operatorId);
   return common::SpillConfig(
-      makeOperatorSpillPath(
-          task->spillDirectory(), pipelineId, driverId, operatorId),
+      getSpillDirPathCb,
+      spillFilePrefix,
       queryConfig.maxSpillFileSize(),
       queryConfig.spillWriteBufferSize(),
       queryConfig.minSpillRunSize(),
@@ -145,7 +150,8 @@ std::optional<common::SpillConfig> DriverCtx::makeSpillConfig(
       queryConfig.maxSpillLevel(),
       queryConfig.writerFlushThresholdBytes(),
       queryConfig.testingSpillPct(),
-      queryConfig.spillCompressionKind());
+      queryConfig.spillCompressionKind(),
+      queryConfig.spillFileCreateConfig());
 }
 
 std::atomic_uint64_t BlockingState::numBlockedDrivers_{0};
@@ -234,6 +240,8 @@ std::ostream& operator<<(std::ostream& out, const StopReason& reason) {
 
 // static
 void Driver::enqueue(std::shared_ptr<Driver> driver) {
+  process::ScopedThreadDebugInfo scopedInfo(
+      driver->driverCtx()->threadDebugInfo);
   // This is expected to be called inside the Driver's Tasks's mutex.
   driver->enqueueInternal();
   if (driver->closed_) {
@@ -477,9 +485,9 @@ StopReason Driver::runInternal(
 
   try {
     // Invoked to initialize the operators once before driver starts execution.
-    self->initializeOperators();
+    initializeOperators();
 
-    TestValue::adjust("facebook::velox::exec::Driver::runInternal", self.get());
+    TestValue::adjust("facebook::velox::exec::Driver::runInternal", this);
 
     const int32_t numOperators = operators_.size();
     ContinueFuture future;
@@ -493,11 +501,10 @@ StopReason Driver::runInternal(
         }
 
         auto op = operators_[i].get();
-        VELOX_CHECK(op->isInitialized());
-
         // In case we are blocked, this index will point to the operator, whose
         // queuedTime we should update.
         curOperatorId_ = i;
+
         CALL_OPERATOR(
             blockingReason_ = op->isBlocked(&future),
             op,
@@ -509,9 +516,10 @@ StopReason Driver::runInternal(
           guard.notThrown();
           return StopReason::kBlock;
         }
-        Operator* nextOp = nullptr;
-        if (i < operators_.size() - 1) {
-          nextOp = operators_[i + 1].get();
+
+        if (i < numOperators - 1) {
+          Operator* nextOp = operators_[i + 1].get();
+
           CALL_OPERATOR(
               blockingReason_ = nextOp->isBlocked(&future),
               nextOp,
@@ -673,7 +681,13 @@ StopReason Driver::runInternal(
               return StopReason::kBlock;
             }
           }
-          if (op->isFinished()) {
+          bool finished{false};
+          CALL_OPERATOR(
+              finished = op->isFinished(),
+              op,
+              curOperatorId_,
+              kOpMethodIsFinished);
+          if (finished) {
             guard.notThrown();
             close();
             return StopReason::kAtEnd;

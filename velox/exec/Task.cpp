@@ -19,6 +19,8 @@
 #include <string>
 
 #include "velox/codegen/Codegen.h"
+#include "velox/common/base/Counters.h"
+#include "velox/common/base/StatsReporter.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/common/time/Timer.h"
 #include "velox/exec/Exchange.h"
@@ -332,15 +334,40 @@ bool Task::allNodesReceivedNoMoreSplitsMessageLocked() const {
   return true;
 }
 
+const std::string& Task::getOrCreateSpillDirectory() {
+  VELOX_CHECK(!spillDirectory_.empty(), "Spill directory not set");
+  if (spillDirectoryCreated_) {
+    return spillDirectory_;
+  }
+
+  std::lock_guard<std::mutex> l(spillDirCreateMutex_);
+  if (spillDirectoryCreated_) {
+    return spillDirectory_;
+  }
+  try {
+    auto fileSystem = filesystems::getFileSystem(spillDirectory_, nullptr);
+    fileSystem->mkdir(spillDirectory_);
+  } catch (const std::exception& e) {
+    VELOX_FAIL(
+        "Failed to create spill directory '{}' for Task {}: {}",
+        spillDirectory_,
+        taskId(),
+        e.what());
+  }
+  spillDirectoryCreated_ = true;
+  return spillDirectory_;
+}
+
 void Task::removeSpillDirectoryIfExists() {
-  if (!spillDirectory_.empty()) {
-    try {
-      auto fs = filesystems::getFileSystem(spillDirectory_, nullptr);
-      fs->rmdir(spillDirectory_);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to remove spill directory '" << spillDirectory_
-                 << "' for Task " << taskId() << ": " << e.what();
-    }
+  if (spillDirectory_.empty() || !spillDirectoryCreated_) {
+    return;
+  }
+  try {
+    auto fs = filesystems::getFileSystem(spillDirectory_, nullptr);
+    fs->rmdir(spillDirectory_);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to remove spill directory '" << spillDirectory_
+               << "' for Task " << taskId() << ": " << e.what();
   }
 }
 
@@ -797,9 +824,9 @@ void Task::resume(std::shared_ptr<Task> self) {
     // Setting pause requested must be atomic with the resuming so that
     // suspended sections do not go back on thread during resume.
     self->pauseRequested_ = false;
-    if (!self->exception_) {
+    if (self->isRunningLocked()) {
       for (auto& driver : self->drivers_) {
-        if (driver) {
+        if (driver != nullptr) {
           if (driver->state().isSuspended) {
             // The Driver will come on thread in its own time as long as
             // the cancel flag is reset. This check needs to be inside 'mutex_'.
@@ -1404,12 +1431,12 @@ bool Task::isUngroupedExecution() const {
 
 bool Task::isRunning() const {
   std::lock_guard<std::mutex> l(mutex_);
-  return (state_ == TaskState::kRunning);
+  return isRunningLocked();
 }
 
 bool Task::isFinished() const {
   std::lock_guard<std::mutex> l(mutex_);
-  return (state_ == TaskState::kFinished);
+  return isFinishedLocked();
 }
 
 bool Task::isRunningLocked() const {
@@ -2249,6 +2276,7 @@ std::string Task::errorMessage() const {
 }
 
 StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
+  TestValue::adjust("facebook::velox::exec::Task::enter", &state);
   std::lock_guard<std::mutex> l(mutex_);
   VELOX_CHECK(state.isEnqueued);
   state.isEnqueued = false;
@@ -2258,7 +2286,7 @@ StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
   if (state.isOnThread()) {
     return StopReason::kAlreadyOnThread;
   }
-  auto reason = shouldStopLocked();
+  const auto reason = shouldStopLocked();
   if (reason == StopReason::kTerminate) {
     state.isTerminated = true;
   }
@@ -2395,11 +2423,11 @@ StopReason Task::leaveSuspended(ThreadState& state) {
 }
 
 StopReason Task::shouldStop() {
-  if (terminateRequested_) {
-    return StopReason::kTerminate;
-  }
   if (pauseRequested_) {
     return StopReason::kPause;
+  }
+  if (terminateRequested_) {
+    return StopReason::kTerminate;
   }
   if (toYield_) {
     std::lock_guard<std::mutex> l(mutex_);
@@ -2428,11 +2456,11 @@ std::vector<ContinuePromise> Task::allThreadsFinishedLocked() {
 }
 
 StopReason Task::shouldStopLocked() {
-  if (terminateRequested_) {
-    return StopReason::kTerminate;
-  }
   if (pauseRequested_) {
     return StopReason::kPause;
+  }
+  if (terminateRequested_) {
+    return StopReason::kTerminate;
   }
   if (toYield_ > 0) {
     --toYield_;
@@ -2518,14 +2546,15 @@ std::unique_ptr<memory::MemoryReclaimer> Task::MemoryReclaimer::create(
 uint64_t Task::MemoryReclaimer::reclaim(
     memory::MemoryPool* pool,
     uint64_t targetBytes,
+    uint64_t maxWaitMs,
     memory::MemoryReclaimer::Stats& stats) {
   auto task = ensureTask();
   if (FOLLY_UNLIKELY(task == nullptr)) {
     return 0;
   }
   VELOX_CHECK_EQ(task->pool()->name(), pool->name());
-  task->requestPause().wait();
-  auto guard = folly::makeGuard([&]() {
+
+  auto resumeGuard = folly::makeGuard([&]() {
     try {
       Task::resume(task);
     } catch (const VeloxRuntimeError& exception) {
@@ -2533,11 +2562,35 @@ uint64_t Task::MemoryReclaimer::reclaim(
                    << " after memory reclamation: " << exception.message();
     }
   });
+  uint64_t reclaimWaitTimeUs{0};
+  bool paused{true};
+  {
+    MicrosecondTimer timer{&reclaimWaitTimeUs};
+    if (maxWaitMs == 0) {
+      task->requestPause().wait();
+    } else {
+      paused = task->requestPause().wait(std::chrono::milliseconds(maxWaitMs));
+    }
+  }
+  VELOX_CHECK(paused || maxWaitMs != 0);
+  if (!paused) {
+    RECORD_METRIC_VALUE(kMetricMemoryReclaimWaitTimeoutCount, 1);
+    VELOX_FAIL(
+        "Memory reclaim failed to wait for task {} to pause after {} with max timeout {}",
+        task->taskId(),
+        succinctMicros(reclaimWaitTimeUs),
+        succinctMillis(maxWaitMs));
+  }
+
+  stats.reclaimWaitTimeUs += reclaimWaitTimeUs;
+  RECORD_HISTOGRAM_METRIC_VALUE(
+      kMetricMemoryReclaimWaitTimeMs, reclaimWaitTimeUs / 1'000);
+
   // Don't reclaim from a cancelled task as it will terminate soon.
   if (task->isCancelled()) {
     return 0;
   }
-  return memory::MemoryReclaimer::reclaim(pool, targetBytes, stats);
+  return memory::MemoryReclaimer::reclaim(pool, targetBytes, maxWaitMs, stats);
 }
 
 void Task::MemoryReclaimer::abort(
@@ -2549,8 +2602,9 @@ void Task::MemoryReclaimer::abort(
   }
   VELOX_CHECK_EQ(task->pool()->name(), pool->name());
   task->setError(error);
+  const static int maxTaskAbortWaitUs = 60'000'000; // 60s
   // Set timeout to zero to infinite wait until task completes.
-  task->taskCompletionFuture(0).wait();
+  task->taskCompletionFuture(maxTaskAbortWaitUs).wait();
   memory::MemoryReclaimer::abort(pool, error);
 }
 

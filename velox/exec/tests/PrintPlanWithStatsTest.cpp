@@ -22,8 +22,6 @@
 #include <gtest/gtest.h>
 #include <re2/re2.h>
 
-DECLARE_int32(split_preload_per_driver);
-
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 
@@ -211,6 +209,7 @@ TEST_F(PrintPlanWithStatsTest, innerJoinWithTableScan) {
        {"          skippedSplits       [ ]* sum: 0, count: 1, min: 0, max: 0"},
        {"          skippedStrides      [ ]* sum: 0, count: 1, min: 0, max: 0"},
        {"          storageReadBytes    [ ]* sum: .+, count: 1, min: .+, max: .+"},
+       {"          totalRemainingFilterTime\\s+sum: .+, count: .+, min: .+, max: .+"},
        {"          totalScanTime       [ ]* sum: .+, count: .+, min: .+, max: .+"},
        {"    -- Project\\[expressions: \\(u_c0:INTEGER, ROW\\[\"c0\"\\]\\), \\(u_c1:BIGINT, ROW\\[\"c1\"\\]\\)\\] -> u_c0:INTEGER, u_c1:BIGINT"},
        {"       Output: 100 rows \\(.+\\), Cpu time: .+, Blocked wall time: .+, Peak memory: 0B, Memory allocations: .+, Threads: 1"},
@@ -235,7 +234,6 @@ TEST_F(PrintPlanWithStatsTest, partialAggregateWithTableScan) {
   for (const auto& numPrefetchSplit : numPrefetchSplits) {
     SCOPED_TRACE(fmt::format("numPrefetchSplit {}", numPrefetchSplit));
     asyncDataCache_->clear();
-    FLAGS_split_preload_per_driver = numPrefetchSplit;
     auto filePath = TempFilePath::create();
     writeToFile(filePath->path, vectors);
 
@@ -246,11 +244,14 @@ TEST_F(PrintPlanWithStatsTest, partialAggregateWithTableScan) {
                 {"c5"}, {"max(c0)", "sum(c1)", "sum(c2)", "sum(c3)", "sum(c4)"})
             .planNode();
 
-    auto task = assertQuery(
-        op,
-        {filePath},
-        "SELECT c5, max(c0), sum(c1), sum(c2), sum(c3), sum(c4) FROM tmp group by c5");
-
+    auto task =
+        AssertQueryBuilder(op, duckDbQueryRunner_)
+            .config(
+                core::QueryConfig::kMaxSplitPreloadPerDriver,
+                std::to_string(numPrefetchSplit))
+            .splits(makeHiveConnectorSplits({filePath}))
+            .assertResults(
+                "SELECT c5, max(c0), sum(c1), sum(c2), sum(c3), sum(c4) FROM tmp group by c5");
     ensureTaskCompletion(task.get());
     compareOutputs(
         ::testing::UnitTest::GetInstance()->current_test_info()->name(),
@@ -302,6 +303,7 @@ TEST_F(PrintPlanWithStatsTest, partialAggregateWithTableScan) {
          {"        skippedSplits    [ ]* sum: 0, count: 1, min: 0, max: 0"},
          {"        skippedStrides   [ ]* sum: 0, count: 1, min: 0, max: 0"},
          {"        storageReadBytes [ ]* sum: .+, count: 1, min: .+, max: .+"},
+         {"        totalRemainingFilterTime\\s+sum: .+, count: .+, min: .+, max: .+"},
          {"        totalScanTime    [ ]* sum: .+, count: .+, min: .+, max: .+"}});
   }
 }

@@ -621,6 +621,7 @@ class Operator : public BaseRuntimeStatWriter {
     uint64_t reclaim(
         memory::MemoryPool* pool,
         uint64_t targetBytes,
+        uint64_t maxWaitMs,
         memory::MemoryReclaimer::Stats& stats) override;
 
     void abort(memory::MemoryPool* pool, const std::exception_ptr& /* error */)
@@ -678,7 +679,7 @@ class Operator : public BaseRuntimeStatWriter {
       std::optional<uint64_t> averageRowSize = std::nullopt) const;
 
   /// Invoked to record spill stats in operator stats.
-  void recordSpillStats(const SpillStats& spillStats);
+  void recordSpillStats(const common::SpillStats& spillStats);
 
   const std::unique_ptr<OperatorCtx> operatorCtx_;
   const RowTypePtr outputType_;
@@ -713,9 +714,6 @@ class Operator : public BaseRuntimeStatWriter {
 
   std::unordered_map<column_index_t, std::shared_ptr<common::Filter>>
       dynamicFilters_;
-
-  /// The number of times that spilling run on this operator.
-  uint32_t numSpillRuns_{0};
 };
 
 /// Given a row type returns indices for the specified subset of columns.

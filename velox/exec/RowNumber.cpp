@@ -78,7 +78,7 @@ void RowNumber::addInput(RowVectorPtr input) {
     }
 
     SelectivityVector rows(numInput);
-    table_->prepareForProbe(*lookup_, input, rows, false);
+    table_->prepareForGroupProbe(*lookup_, input, rows, false);
     table_->groupProbe(*lookup_);
 
     // Initialize new partitions with zeros.
@@ -93,7 +93,7 @@ void RowNumber::addInput(RowVectorPtr input) {
 void RowNumber::addSpillInput() {
   const auto numInput = input_->size();
   SelectivityVector rows(numInput);
-  table_->prepareForProbe(*lookup_, input_, rows, false);
+  table_->prepareForGroupProbe(*lookup_, input_, rows, false);
   table_->groupProbe(*lookup_);
 
   // Initialize new partitions with zeros.
@@ -133,12 +133,12 @@ void RowNumber::restoreNextSpillPartition() {
   }
 
   auto it = spillInputPartitionSet_.begin();
-  spillInputReader_ = it->second->createReader();
+  spillInputReader_ = it->second->createUnorderedReader(pool());
 
   // Find matching partition for the hash table.
   auto hashTableIt = spillHashTablePartitionSet_.find(it->first);
   if (hashTableIt != spillHashTablePartitionSet_.end()) {
-    spillHashTableReader_ = hashTableIt->second->createReader();
+    spillHashTableReader_ = hashTableIt->second->createUnorderedReader(pool());
 
     RowVectorPtr data;
     while (spillHashTableReader_->nextBatch(data)) {
@@ -157,7 +157,7 @@ void RowNumber::restoreNextSpillPartition() {
 
       const auto numInput = input->size();
       SelectivityVector rows(numInput);
-      table_->prepareForProbe(*lookup_, input, rows, false);
+      table_->prepareForGroupProbe(*lookup_, input, rows, false);
       table_->groupProbe(*lookup_);
 
       auto* counts = data->children().back()->as<FlatVector<int64_t>>();
@@ -236,7 +236,10 @@ void RowNumber::ensureInputFits(const RowVectorPtr& input) {
     }
   }
 
-  spill();
+  LOG(WARNING) << "Failed to reserve " << succinctBytes(targetIncrementBytes)
+               << " for memory pool " << pool()->name()
+               << ", usage: " << succinctBytes(pool()->currentBytes())
+               << ", reservation: " << succinctBytes(pool()->reservedBytes());
 }
 
 FlatVector<int64_t>& RowNumber::getOrCreateRowNumberVector(vector_size_t size) {
@@ -391,12 +394,14 @@ void RowNumber::setupHashTableSpiller() {
       table_->rows(),
       tableType,
       std::move(hashBits),
-      spillConfig.filePath,
+      spillConfig.getSpillDirPathCb,
+      spillConfig.fileNamePrefix,
       spillConfig.maxFileSize,
       spillConfig.writeBufferSize,
       spillConfig.compressionKind,
       memory::spillMemoryPool(),
-      spillConfig.executor);
+      spillConfig.executor,
+      spillConfig.fileCreateConfig);
 }
 
 void RowNumber::setupInputSpiller() {
@@ -408,12 +413,14 @@ void RowNumber::setupInputSpiller() {
       Spiller::Type::kHashJoinProbe,
       inputType_,
       hashBits,
-      spillConfig.filePath,
+      spillConfig.getSpillDirPathCb,
+      spillConfig.fileNamePrefix,
       spillConfig.maxFileSize,
       spillConfig.writeBufferSize,
       spillConfig.compressionKind,
       memory::spillMemoryPool(),
-      spillConfig.executor);
+      spillConfig.executor,
+      spillConfig.fileCreateConfig);
 
   const auto& hashers = table_->hashers();
 

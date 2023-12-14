@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 #include "velox/exec/Operator.h"
+#include "velox/common/base/Counters.h"
+#include "velox/common/base/StatsReporter.h"
 #include "velox/common/base/SuccinctPrinter.h"
 #include "velox/common/testutil/TestValue.h"
 #include "velox/exec/Driver.h"
@@ -54,7 +56,7 @@ OperatorCtx::createConnectorQueryCtx(
   return std::make_shared<connector::ConnectorQueryCtx>(
       pool_,
       connectorPool,
-      driverCtx_->task->queryCtx()->getConnectorConfig(connectorId),
+      driverCtx_->task->queryCtx()->connectorSessionProperties(connectorId),
       spillConfig,
       std::make_unique<SimpleExpressionEvaluator>(
           execCtx()->queryCtx(), execCtx()->pool()),
@@ -293,7 +295,7 @@ void Operator::recordBlockingTime(uint64_t start, BlockingReason reason) {
       fmt::format("blocked{}Times", blockReason), RuntimeCounter(1));
 }
 
-void Operator::recordSpillStats(const SpillStats& spillStats) {
+void Operator::recordSpillStats(const common::SpillStats& spillStats) {
   VELOX_CHECK(noMoreInput_);
   auto lockedStats = stats_.wlock();
   lockedStats->spilledInputBytes += spillStats.spilledInputBytes;
@@ -351,10 +353,11 @@ void Operator::recordSpillStats(const SpillStats& spillStats) {
                 Timestamp::kNanosecondsInMicrosecond),
             RuntimeCounter::Unit::kNanos});
   }
-  if (numSpillRuns_ != 0) {
+  if (spillStats.spillRuns != 0) {
     lockedStats->addRuntimeStat(
-        "spillRuns", RuntimeCounter{static_cast<int64_t>(numSpillRuns_)});
-    updateGlobalSpillRunStats(numSpillRuns_);
+        "spillRuns",
+        RuntimeCounter{static_cast<int64_t>(spillStats.spillRuns)});
+    common::updateGlobalSpillRunStats(spillStats.spillRuns);
   }
 
   if (spillStats.spillMaxLevelExceededCount != 0) {
@@ -362,7 +365,7 @@ void Operator::recordSpillStats(const SpillStats& spillStats) {
         "exceededMaxSpillLevel",
         RuntimeCounter{
             static_cast<int64_t>(spillStats.spillMaxLevelExceededCount)});
-    updateGlobalMaxSpillLevelExceededCount(
+    common::updateGlobalMaxSpillLevelExceededCount(
         spillStats.spillMaxLevelExceededCount);
   }
 }
@@ -581,6 +584,7 @@ bool Operator::MemoryReclaimer::reclaimableBytes(
 uint64_t Operator::MemoryReclaimer::reclaim(
     memory::MemoryPool* pool,
     uint64_t targetBytes,
+    uint64_t /*unused*/,
     memory::MemoryReclaimer::Stats& stats) {
   std::shared_ptr<Driver> driver = ensureDriver();
   if (FOLLY_UNLIKELY(driver == nullptr)) {
@@ -603,6 +607,7 @@ uint64_t Operator::MemoryReclaimer::reclaim(
   if (op_->nonReclaimableSection_) {
     // TODO: reduce the log frequency if it is too verbose.
     ++stats.numNonReclaimableAttempts;
+    RECORD_METRIC_VALUE(kMetricMemoryNonReclaimableCount);
     LOG(WARNING) << "Can't reclaim from memory pool " << pool->name()
                  << " which is under non-reclaimable section, memory usage: "
                  << succinctBytes(pool->currentBytes())
@@ -611,8 +616,15 @@ uint64_t Operator::MemoryReclaimer::reclaim(
   }
 
   RuntimeStatWriterScopeGuard opStatsGuard(op_);
-  op_->reclaim(targetBytes, stats);
-  return pool->shrink(targetBytes);
+
+  auto reclaimBytes = memory::MemoryReclaimer::run(
+      [&]() {
+        op_->reclaim(targetBytes, stats);
+        return pool->shrink(targetBytes);
+      },
+      stats);
+
+  return reclaimBytes;
 }
 
 void Operator::MemoryReclaimer::abort(

@@ -35,10 +35,12 @@ MemoryManager::MemoryManager(const MemoryManagerOptions& options)
            .capacity = std::min(options.queryMemoryCapacity, options.capacity),
            .memoryPoolInitCapacity = options.memoryPoolInitCapacity,
            .memoryPoolTransferCapacity = options.memoryPoolTransferCapacity,
+           .memoryReclaimWaitMs = options.memoryReclaimWaitMs,
            .arbitrationStateCheckCb = options.arbitrationStateCheckCb})),
       alignment_(std::max(MemoryAllocator::kMinAlignment, options.alignment)),
       checkUsageLeak_(options.checkUsageLeak),
       debugEnabled_(options.debugEnabled),
+      coreOnAllocationFailureEnabled_(options.coreOnAllocationFailureEnabled),
       poolDestructionCb_([&](MemoryPool* pool) { dropPool(pool); }),
       defaultRoot_{std::make_shared<MemoryPoolImpl>(
           this,
@@ -54,7 +56,9 @@ MemoryManager::MemoryManager(const MemoryManagerOptions& options)
               .maxCapacity = kMaxMemory,
               .trackUsage = options.trackDefaultUsage,
               .checkUsageLeak = options.checkUsageLeak,
-              .debugEnabled = options.debugEnabled})} {
+              .debugEnabled = options.debugEnabled,
+              .coreOnAllocationFailureEnabled =
+                  options.coreOnAllocationFailureEnabled})} {
   VELOX_CHECK_NOT_NULL(allocator_);
   VELOX_CHECK_NOT_NULL(arbitrator_);
   VELOX_CHECK_EQ(
@@ -82,7 +86,7 @@ MemoryManager::~MemoryManager() {
         0,
         "There are {} unexpected alive memory pools allocated by user on memory manager destruction:\n{}",
         numPools(),
-        toString());
+        toString(true));
   }
 }
 
@@ -116,6 +120,7 @@ std::shared_ptr<MemoryPool> MemoryManager::addRootPool(
   options.trackUsage = true;
   options.checkUsageLeak = checkUsageLeak_;
   options.debugEnabled = debugEnabled_;
+  options.coreOnAllocationFailureEnabled = coreOnAllocationFailureEnabled_;
 
   folly::SharedMutex::WriteHolder guard{mutex_};
   if (pools_.find(poolName) != pools_.end()) {
@@ -195,7 +200,7 @@ MemoryArbitrator* MemoryManager::arbitrator() {
   return arbitrator_.get();
 }
 
-std::string MemoryManager::toString() const {
+std::string MemoryManager::toString(bool detail) const {
   std::stringstream out;
   out << "Memory Manager[capacity "
       << (capacity_ == kMaxMemory ? "UNLIMITED" : succinctBytes(capacity_))
@@ -203,10 +208,18 @@ std::string MemoryManager::toString() const {
       << succinctBytes(getTotalBytes()) << " number of pools " << numPools()
       << "\n";
   out << "List of root pools:\n";
-  out << "\t" << defaultRoot_->name() << "\n";
+  if (detail) {
+    out << defaultRoot_->treeMemoryUsage();
+  } else {
+    out << "\t" << defaultRoot_->name() << "\n";
+  }
   std::vector<std::shared_ptr<MemoryPool>> pools = getAlivePools();
   for (const auto& pool : pools) {
-    out << "\t" << pool->name() << "\n";
+    if (detail) {
+      out << pool->treeMemoryUsage();
+    } else {
+      out << "\t" << pool->name() << "\n";
+    }
   }
   out << allocator_->toString() << "\n";
   out << arbitrator_->toString();

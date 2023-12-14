@@ -376,6 +376,16 @@ class AggregationTest : public OperatorTestBase {
         pool_.get());
   }
 
+  static void reclaimAndRestoreCapacity(
+      const Operator* op,
+      uint64_t targetBytes,
+      memory::MemoryReclaimer::Stats& reclaimerStats) {
+    const auto oldCapacity = op->pool()->capacity();
+    op->pool()->reclaim(targetBytes, 0, reclaimerStats);
+    dynamic_cast<memory::MemoryPoolImpl*>(op->pool())
+        ->testingSetCapacity(oldCapacity);
+  }
+
   RowTypePtr rowType_{
       ROW({"c0", "c1", "c2", "c3", "c4", "c5", "c6"},
           {BIGINT(),
@@ -687,10 +697,10 @@ TEST_F(AggregationTest, hashmodes) {
   makeModeTestKeys(rowType, 20000, 2, 2, 2, 4, 4, 4, batches);
   // 20K rows with all at slightly higher cardinality, still in array range.
   makeModeTestKeys(rowType, 20000, 2, 2, 2, 4, 16, 4, batches);
-  // 100K rows with cardinality outside of array range. We transit to
+  // 25K rows with cardinality outside of array range. We transit to
   // generic hash table from normalized keys when running out of quota
   // for distinct string storage for the sixth key.
-  makeModeTestKeys(rowType, 100000, 1000000, 2, 2, 4, 4, 1000000, batches);
+  makeModeTestKeys(rowType, 25000, 1000000, 2, 2, 4, 4, 1000000, batches);
   createDuckDbTable(batches);
   auto op =
       PlanBuilder()
@@ -698,10 +708,19 @@ TEST_F(AggregationTest, hashmodes) {
           .singleAggregation({"c0", "c1", "c2", "c3", "c4", "c5"}, {"sum(1)"})
           .planNode();
 
+  std::atomic<BaseHashTable::HashMode> mode{BaseHashTable::HashMode::kArray};
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashTable::setHashMode",
+      std::function<void(void*)>([&](void* newMode) {
+        mode = *reinterpret_cast<BaseHashTable::HashMode*>(newMode);
+      }));
   assertQuery(
       op,
       "SELECT c0, c1, C2, C3, C4, C5, sum(1) FROM tmp "
       " GROUP BY c0, c1, c2, c3, c4, c5");
+#ifndef NDEBUG
+  EXPECT_EQ(mode, BaseHashTable::HashMode::kHash);
+#endif
 }
 
 TEST_F(AggregationTest, rangeToDistinct) {
@@ -1804,27 +1823,40 @@ TEST_F(AggregationTest, spillingForAggrsWithSorting) {
   auto vectors = makeVectors(rowType_, 100, 10);
   createDuckDbTable(vectors);
   auto spillDirectory = exec::test::TempDirectoryPath::create();
+
   core::PlanNodeId aggrNodeId;
-  auto task =
-      AssertQueryBuilder(duckDbQueryRunner_)
-          .spillDirectory(spillDirectory->path)
-          .config(QueryConfig::kSpillEnabled, "true")
-          .config(QueryConfig::kAggregationSpillEnabled, "true")
-          .config(QueryConfig::kTestingSpillPct, "100")
-          .plan(PlanBuilder()
-                    .values(vectors)
-                    .singleAggregation({"c1"}, {"count(c0 ORDER BY c2)"}, {})
-                    .capturePlanNodeId(aggrNodeId)
-                    .planNode())
-          .assertResults(
-              "SELECT c1, count(c0 ORDER BY c2) FROM tmp GROUP BY c1");
-  // Verify that spilling is not triggered.
-  const auto& queryConfig = task->queryCtx()->queryConfig();
-  ASSERT_TRUE(queryConfig.spillEnabled());
-  ASSERT_TRUE(queryConfig.aggregationSpillEnabled());
-  ASSERT_EQ(100, queryConfig.testingSpillPct());
-  ASSERT_EQ(toPlanStats(task->taskStats()).at(aggrNodeId).spilledBytes, 0);
-  OperatorTestBase::deleteTaskAndCheckSpillDirectory(task);
+
+  auto testPlan = [&](const core::PlanNodePtr& plan, const std::string& sql) {
+    SCOPED_TRACE(sql);
+    auto task = AssertQueryBuilder(duckDbQueryRunner_)
+                    .spillDirectory(spillDirectory->path)
+                    .config(QueryConfig::kSpillEnabled, "true")
+                    .config(QueryConfig::kAggregationSpillEnabled, "true")
+                    .config(QueryConfig::kTestingSpillPct, "100")
+                    .plan(plan)
+                    .assertResults(sql);
+
+    auto taskStats = exec::toPlanStats(task->taskStats());
+    auto& stats = taskStats.at(aggrNodeId);
+    checkSpillStats(stats, true);
+    OperatorTestBase::deleteTaskAndCheckSpillDirectory(task);
+  };
+
+  auto plan = PlanBuilder()
+                  .values(vectors)
+                  .singleAggregation({"c0"}, {"array_agg(c1 ORDER BY c1)"}, {})
+                  .capturePlanNodeId(aggrNodeId)
+                  .planNode();
+  testPlan(plan, "SELECT c0, array_agg(c1 ORDER BY c1) FROM tmp GROUP BY 1");
+
+  plan = PlanBuilder()
+             .values(vectors)
+             .project({"c0 % 7", "c1"})
+             .singleAggregation({"p0"}, {"array_agg(c1 ORDER BY c1)"}, {})
+             .capturePlanNodeId(aggrNodeId)
+             .planNode();
+  testPlan(
+      plan, "SELECT c0 % 7, array_agg(c1 ORDER BY c1) FROM tmp GROUP BY 1");
 }
 
 TEST_F(AggregationTest, distinctSpillWithMemoryLimit) {
@@ -1997,7 +2029,7 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimDuringInputProcessing) {
     auto queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
     queryCtx->testingOverrideMemoryPool(
         memory::defaultMemoryManager().addRootPool(
-            queryCtx->queryId(), kMaxBytes));
+            queryCtx->queryId(), kMaxBytes, memory::MemoryReclaimer::create()));
     auto expectedResult =
         AssertQueryBuilder(
             PlanBuilder()
@@ -2090,9 +2122,13 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimDuringInputProcessing) {
 
     if (testData.expectedReclaimable) {
       const auto usedMemory = op->pool()->currentBytes();
-      op->reclaim(
+      reclaimAndRestoreCapacity(
+          op,
           folly::Random::oneIn(2) ? 0 : folly::Random::rand32(rng_),
           reclaimerStats_);
+      ASSERT_GT(reclaimerStats_.reclaimExecTimeUs, 0);
+      ASSERT_GT(reclaimerStats_.reclaimedBytes, 0);
+      reclaimerStats_.reset();
       // The hash table itself in the grouping set is not cleared so it still
       // uses some memory.
       ASSERT_LT(op->pool()->currentBytes(), usedMemory);
@@ -2136,7 +2172,7 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimDuringReserve) {
   auto queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
   queryCtx->testingOverrideMemoryPool(
       memory::defaultMemoryManager().addRootPool(
-          queryCtx->queryId(), kMaxBytes));
+          queryCtx->queryId(), kMaxBytes, memory::MemoryReclaimer::create()));
   auto expectedResult =
       AssertQueryBuilder(PlanBuilder()
                              .values(batches)
@@ -2211,9 +2247,13 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimDuringReserve) {
   ASSERT_GT(reclaimableBytes, 0);
 
   const auto usedMemory = op->pool()->currentBytes();
-  op->reclaim(
+  reclaimAndRestoreCapacity(
+      op,
       folly::Random::oneIn(2) ? 0 : folly::Random::rand32(rng_),
       reclaimerStats_);
+  ASSERT_GT(reclaimerStats_.reclaimExecTimeUs, 0);
+  ASSERT_GT(reclaimerStats_.reclaimedBytes, 0);
+  reclaimerStats_.reset();
   // The hash table itself in the grouping set is not cleared so it still
   // uses some memory.
   ASSERT_LT(op->pool()->currentBytes(), usedMemory);
@@ -2368,7 +2408,7 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimDuringOutputProcessing) {
     auto queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
     queryCtx->testingOverrideMemoryPool(
         memory::defaultMemoryManager().addRootPool(
-            queryCtx->queryId(), kMaxBytes));
+            queryCtx->queryId(), kMaxBytes, memory::MemoryReclaimer::create()));
     auto expectedResult =
         AssertQueryBuilder(
             PlanBuilder()
@@ -2451,11 +2491,15 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimDuringOutputProcessing) {
     if (enableSpilling) {
       ASSERT_GT(reclaimableBytes, 0);
       const auto usedMemory = op->pool()->currentBytes();
-      op->reclaim(
+      reclaimAndRestoreCapacity(
+          op,
           folly::Random::oneIn(2) ? 0 : folly::Random::rand32(rng_),
           reclaimerStats_);
       ASSERT_EQ(reclaimerStats_.numNonReclaimableAttempts, 0);
       ASSERT_GT(usedMemory, op->pool()->currentBytes());
+      ASSERT_GT(reclaimerStats_.reclaimedBytes, 0);
+      ASSERT_GT(reclaimerStats_.reclaimExecTimeUs, 0);
+      reclaimerStats_.reset();
     } else {
       ASSERT_EQ(reclaimableBytes, 0);
       VELOX_ASSERT_THROW(
@@ -2736,9 +2780,11 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimWithEmptyAggregationTable) {
     if (enableSpilling) {
       ASSERT_EQ(reclaimableBytes, 0);
       const auto usedMemory = op->pool()->currentBytes();
-      op->reclaim(
+      reclaimAndRestoreCapacity(
+          op,
           folly::Random::oneIn(2) ? 0 : folly::Random::rand32(rng_),
           reclaimerStats_);
+      ASSERT_EQ(reclaimerStats_, memory::MemoryReclaimer::Stats{});
       // No reclaim as the operator has started output processing.
       ASSERT_EQ(usedMemory, op->pool()->currentBytes());
     } else {
@@ -2970,6 +3016,52 @@ TEST_F(AggregationTest, noAggregationsNoGroupingKeys) {
   ASSERT_EQ(result->type()->size(), 0);
 }
 
+// Reproduces hang in partial distinct aggregation described in
+// https://github.com/facebookincubator/velox/issues/7967 .
+TEST_F(AggregationTest, distinctHang) {
+  static const int32_t kMin = std::numeric_limits<int32_t>::min();
+  static const int32_t kMax = std::numeric_limits<int32_t>::max();
+  auto data = makeRowVector({
+      makeFlatVector<int64_t>(
+          5'000,
+          [](auto row) {
+            if (row % 2 == 0) {
+              return kMin + row;
+            } else {
+              return kMax - row;
+            }
+          }),
+      makeFlatVector<int64_t>(
+          5'000,
+          [](auto row) {
+            if (row % 2 == 0) {
+              return kMin - row;
+            } else {
+              return kMax + row;
+            }
+          }),
+  });
+
+  auto newData = makeRowVector({
+      makeFlatVector<int64_t>(
+          5'000, [](auto row) { return kMin + row + 5'000; }),
+      makeFlatVector<int64_t>(5'000, [](auto row) { return kMin - row; }),
+  });
+
+  createDuckDbTable({data, newData});
+
+  core::PlanNodeId aggNodeId;
+  auto plan = PlanBuilder()
+                  .values({data, newData, data})
+                  .partialAggregation({"c0", "c1"}, {})
+                  .capturePlanNodeId(aggNodeId)
+                  .planNode();
+
+  AssertQueryBuilder(plan, duckDbQueryRunner_)
+      .config(QueryConfig::kMaxPartialAggregationMemory, "400000")
+      .assertResults("SELECT distinct c0, c1 FROM tmp");
+}
+
 // Trigger memory pool allocation at HashAggregation::populateAggregateInputs by
 // aggregating null constant. Ensure the allocation happens outside of
 // HashAggregation's constructor.
@@ -3009,8 +3101,11 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimEmptyInput) {
         {
           MemoryReclaimer::Stats stats;
           SuspendedSection suspendedSection(driver);
-          task->pool()->reclaim(kMaxBytes, stats);
+          task->pool()->reclaim(kMaxBytes, 0, stats);
           ASSERT_EQ(stats.numNonReclaimableAttempts, 0);
+          ASSERT_GT(stats.reclaimExecTimeUs, 0);
+          ASSERT_GT(stats.reclaimedBytes, 0);
+          ASSERT_GT(stats.reclaimWaitTimeUs, 0);
         }
         static_cast<memory::MemoryPoolImpl*>(task->pool())
             ->testingSetCapacity(kMaxBytes);
@@ -3076,8 +3171,11 @@ DEBUG_ONLY_TEST_F(AggregationTest, reclaimEmptyOutput) {
         {
           MemoryReclaimer::Stats stats;
           SuspendedSection suspendedSection(driver);
-          task->pool()->reclaim(kMaxBytes, stats);
+          task->pool()->reclaim(kMaxBytes, 0, stats);
           ASSERT_EQ(stats.numNonReclaimableAttempts, 0);
+          ASSERT_GT(stats.reclaimExecTimeUs, 0);
+          ASSERT_GT(stats.reclaimedBytes, 0);
+          ASSERT_GT(stats.reclaimWaitTimeUs, 0);
         }
         // Sets back the memory capacity to proceed the test.
         static_cast<memory::MemoryPoolImpl*>(task->pool())

@@ -146,30 +146,136 @@ class PlanBuilder {
       const std::string& remainingFilter = "",
       const RowTypePtr& dataColumns = nullptr);
 
-  /// Add a TableScanNode using a connector-specific table handle and
-  /// assignments. Supports any connector, not just Hive connector.
-  ///
-  /// @param outputType List of column names and types to project out. Column
-  /// names should match the keys in the 'assignments' map. The 'assignments'
-  /// map may contain more columns then 'outputType' if some columns are only
-  /// used by pushed-down filters.
-  PlanBuilder& tableScan(
-      const RowTypePtr& outputType,
-      const std::shared_ptr<connector::ConnectorTableHandle>& tableHandle,
-      const std::unordered_map<
-          std::string,
-          std::shared_ptr<connector::ColumnHandle>>& assignments);
-
   /// Add a TableScanNode to scan a TPC-H table.
   ///
   /// @param tpchTableHandle The handle that specifies the target TPC-H table
   /// and scale factor.
   /// @param columnNames The columns to be returned from that table.
   /// @param scaleFactor The TPC-H scale factor.
-  PlanBuilder& tableScan(
+  PlanBuilder& tpchTableScan(
       tpch::Table table,
       std::vector<std::string>&& columnNames,
       double scaleFactor = 1);
+
+  /// Helper class to build a custom TableScanNode.
+  /// Uses a planBuilder instance to get the next plan id, memory pool, and
+  /// parse options.
+  class TableScanBuilder {
+   public:
+    TableScanBuilder(PlanBuilder& builder) : planBuilder_(builder) {}
+
+    /// @param tableName The name of the table to scan.
+    TableScanBuilder& tableName(std::string tableName) {
+      tableName_ = std::move(tableName);
+      return *this;
+    }
+
+    /// @param connectorId The id of the connector to scan.
+    TableScanBuilder& connectorId(std::string connectorId) {
+      connectorId_ = std::move(connectorId);
+      return *this;
+    }
+
+    /// @param outputType List of column names and types to read from the table.
+    TableScanBuilder& outputType(RowTypePtr outputType) {
+      outputType_ = std::move(outputType);
+      return *this;
+    }
+
+    /// @param subfieldFilters A list of SQL expressions for the range filters
+    /// to apply to individual columns. Supported filters are: column <= value,
+    /// column < value, column >= value, column > value, column = value, column
+    /// IN (v1, v2,.. vN), column < v1 OR column >= v2.
+    TableScanBuilder& subfieldFilters(
+        std::vector<std::string> subfieldFilters) {
+      subfieldFilters_ = std::move(subfieldFilters);
+      return *this;
+    }
+
+    /// @param subfieldFilter A SQL expression for the range filter
+    /// to apply to an individual column. Supported filters are: column <=
+    /// value, column < value, column >= value, column > value, column = value,
+    /// column IN (v1, v2,.. vN), column < v1 OR column >= v2.
+    TableScanBuilder& subfieldFilter(std::string subfieldFilter) {
+      subfieldFilters_.emplace_back(std::move(subfieldFilter));
+      return *this;
+    }
+
+    /// @param remainingFilter SQL expression for the additional conjunct. May
+    /// include multiple columns and SQL functions. The remainingFilter is
+    /// AND'ed with all the subfieldFilters.
+    TableScanBuilder& remainingFilter(std::string remainingFilter) {
+      remainingFilter_ = std::move(remainingFilter);
+      return *this;
+    }
+
+    /// @param dataColumns can be different from 'outputType' for the purposes
+    /// of testing queries using missing columns. It is used, if specified, for
+    /// parseExpr call and as 'dataColumns' for the TableHandle. You supply more
+    /// types (for all columns) in this argument as opposed to 'outputType',
+    /// where you define the output types only. See 'missingColumns' test in
+    /// 'TableScanTest'.
+    TableScanBuilder& dataColumns(RowTypePtr dataColumns) {
+      dataColumns_ = std::move(dataColumns);
+      return *this;
+    }
+
+    /// @param columnAliases Optional aliases for the column names. The key is
+    /// the alias (name in 'outputType'), value is the name in the files.
+    TableScanBuilder& columnAliases(
+        std::unordered_map<std::string, std::string> columnAliases) {
+      columnAliases_ = std::move(columnAliases);
+      return *this;
+    }
+
+    /// @param tableHandle Optional tableHandle. Other builder arguments such as
+    /// the subfieldFilters and remainingFilter will be ignored.
+    TableScanBuilder& tableHandle(
+        std::shared_ptr<connector::ConnectorTableHandle> tableHandle) {
+      tableHandle_ = std::move(tableHandle);
+      return *this;
+    }
+
+    /// @param assignments Optional ColumnHandles.
+    /// outputType names should match the keys in the 'assignments' map. The
+    /// 'assignments' map may contain more columns than 'outputType' if some
+    /// columns are only used by pushed-down filters.
+    TableScanBuilder& assignments(
+        std::unordered_map<
+            std::string,
+            std::shared_ptr<connector::ColumnHandle>> assignments) {
+      assignments_ = std::move(assignments);
+      return *this;
+    }
+
+    /// Stop the TableScanBuilder.
+    PlanBuilder& endTableScan() {
+      planBuilder_.planNode_ = build(planBuilder_.nextPlanNodeId());
+      return planBuilder_;
+    }
+
+   private:
+    /// Build the plan node TableScanNode.
+    core::PlanNodePtr build(core::PlanNodeId id);
+
+    PlanBuilder& planBuilder_;
+    std::string tableName_{"hive_table"};
+    std::string connectorId_{"test-hive"};
+    RowTypePtr outputType_;
+    std::vector<std::string> subfieldFilters_;
+    std::string remainingFilter_;
+    RowTypePtr dataColumns_;
+    std::unordered_map<std::string, std::string> columnAliases_;
+    std::shared_ptr<connector::ConnectorTableHandle> tableHandle_;
+    std::unordered_map<std::string, std::shared_ptr<connector::ColumnHandle>>
+        assignments_;
+  };
+
+  /// Start a TableScanBuilder.
+  TableScanBuilder& startTableScan() {
+    tableScanBuilder_.reset(new TableScanBuilder(*this));
+    return *tableScanBuilder_;
+  }
 
   /// Add a ValuesNode using specified data.
   ///
@@ -227,6 +333,12 @@ class PlanBuilder {
   ///
   /// will produce projected columns named sum_ab, c and p2.
   PlanBuilder& project(const std::vector<std::string>& projections);
+
+  /// Add a ProjectNode to keep all existing columns and append more columns
+  /// using specified expressions.
+  /// @param newColumns A list of one or more expressions to use for computing
+  /// additional columns.
+  PlanBuilder& appendColumns(const std::vector<std::string>& newColumns);
 
   /// Variation of project that takes untyped expressions.  Used for access
   /// deeply nested types, in which case Duck DB often fails to parse or infer
@@ -517,6 +629,25 @@ class PlanBuilder {
       const std::vector<std::string>& aggregationInputs,
       std::string groupIdName = "group_id");
 
+  /// Add an ExpandNode using specified projections. See comments for
+  /// ExpandNode class for description of this plan node.
+  ///
+  /// @param projections A list of projection expressions. Each expression is
+  /// either a column name, null or non-null constant.
+  ///
+  /// For example,
+  ///
+  ///     .expand(
+  ///            {{"k1", "null:: bigint k2", "a", "b", "0 as gid"}, //
+  ///            Column name will be extracted from the first projection. If the
+  ///            column is null, it is also necessary to specify the column
+  ///            type.
+  ///             {"k1", "null", "a", "b", "1"},
+  ///             {"null", "null", "a", "b", "2"}})
+  ///
+  ///
+  PlanBuilder& expand(const std::vector<std::vector<std::string>>& projections);
+
   /// Add a LocalMergeNode using specified ORDER BY clauses.
   ///
   /// For example,
@@ -562,7 +693,7 @@ class PlanBuilder {
   /// @param isPartial Boolean indicating whether the limit node is partial or
   /// final. Partial limit can run multi-threaded. Final limit must run
   /// single-threaded.
-  PlanBuilder& limit(int32_t offset, int32_t count, bool isPartial);
+  PlanBuilder& limit(int64_t offset, int64_t count, bool isPartial);
 
   /// Add an EnforceSingleRowNode to ensure input has at most one row at
   /// runtime.
@@ -870,7 +1001,9 @@ class PlanBuilder {
   std::shared_ptr<const core::FieldAccessTypedExpr> field(
       const std::string& name);
 
-  std::vector<core::TypedExprPtr> exprs(const std::vector<std::string>& names);
+  std::vector<core::TypedExprPtr> exprs(
+      const std::vector<std::string>& expressions,
+      const RowTypePtr& inputType);
 
   std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> fields(
       const std::vector<std::string>& names);
@@ -924,6 +1057,7 @@ class PlanBuilder {
  protected:
   core::PlanNodePtr planNode_;
   parse::ParseOptions options_;
+  std::shared_ptr<TableScanBuilder> tableScanBuilder_;
 
  private:
   std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator_;

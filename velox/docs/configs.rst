@@ -94,7 +94,14 @@ Generic Configuration
    * - max_page_partitioning_buffer_size
      - integer
      - 32MB
-     - The target size for a Task's buffered output. The producer Drivers are blocked when the buffered size exceeds this.
+     - The maximum size in bytes for the task's buffered output when output is partitioned using hash of partitioning keys. See PartitionedOutputNode::Kind::kPartitioned.
+       The producer Drivers are blocked when the buffered size exceeds this.
+       The Drivers are resumed when the buffered size goes below OutputBufferManager::kContinuePct (90)% of this.
+   * - max_arbitrary_buffer_size
+     - integer
+     - 32MB
+     - The maximum size in bytes for the task's buffered output when output is distributed randomly among consumers. See PartitionedOutputNode::Kind::kArbitrary.
+       The producer Drivers are blocked when the buffered size exceeds this.
        The Drivers are resumed when the buffered size goes below OutputBufferManager::kContinuePct (90)% of this.
    * - min_table_rows_for_parallel_join_build
      - integer
@@ -137,7 +144,7 @@ Expression Evaluation Configuration
      - bool
      - false
      - Enables legacy CAST semantics if set to true. CAST(timestamp AS varchar) uses 'T' as separator between date and
-       time (instead of a space).
+       time (instead of a space), and the year part is not padded.
    * - cast_match_struct_by_name
      - bool
      - false
@@ -308,6 +315,21 @@ Spilling
      - 0
      - Percentage of aggregation or join input batches that will be forced to spill for testing. 0 means no extra spilling.
 
+Table Scan
+------------
+.. list-table::
+   :widths: 20 10 10 70
+   :header-rows: 1
+
+   * - Property Name
+     - Type
+     - Default Value
+     - Description
+   * - max_split_preload_per_driver
+     - integer
+     - 2
+     - Maximum number of splits to preload per driver. Set to 0 to disable preloading.
+
 Table Writer
 ------------
 .. list-table::
@@ -352,19 +374,25 @@ Codegen Configuration
 
 Hive Connector
 --------------
+Hive Connector config is initialized on velox runtime startup and is shared among queries as the default config.
+Each query can override the config by setting corresponding query session properties such as in Prestissimo.
+
 .. list-table::
-   :widths: 20 10 10 70
+   :widths: 20 20 10 10 70
    :header-rows: 1
 
-   * - Property Name
+   * - Configuration Property Name
+     - Session Property Name
      - Type
      - Default Value
      - Description
-   * - max_partitions_per_writers
+   * - hive.max-partitions-per-writers
+     -
      - integer
      - 100
      - Maximum number of (bucketed) partitions per a single table writer instance.
-   * - insert_existing_partitions_behavior
+   * - insert-existing-partitions-behavior
+     - insert_existing_partitions_behavior
      - string
      - ERROR
      - **Allowed values:** ``OVERWRITE``, ``ERROR``. The behavior on insert existing partitions. This property only derives
@@ -372,23 +400,59 @@ Hive Connector
        sets the update mode to indicate overwriting a partition if exists. ``ERROR`` sets the update mode to indicate
        error throwing if writing to an existing partition.
    * - hive.immutable-partitions
+     -
      - bool
      - false
      - True if appending data to an existing unpartitioned table is allowed. Currently this configuration does not
        support appending to existing partitions.
-   * - file_column_names_read_as_lower_case
+   * - file-column-names-read-as-lower-case
+     -
      - bool
      - false
      - True if reading the source file column names as lower case, and planner should guarantee
        the input column name and filter is also lower case to achive case-insensitive read.
    * - max-coalesced-bytes
+     -
      - integer
      - 512KB
      - Maximum size in bytes to coalesce requests to be fetched in a single request.
    * - max-coalesced-distance-bytes
+     -
      - integer
      - 128MB
      - Maximum distance in bytes between chunks to be fetched that may be coalesced into a single request.
+   * - num-cached-file-handles
+     -
+     - integer
+     - 20000
+     - Maximum number of entries in the file handle cache. The value must be non-negative. Zero value
+       indicates infinite cache capacity.
+   * - file-handle-cache-enabled
+     -
+     - bool
+     - true
+     - Enables caching of file handles if true. Disables caching if false. File handle cache should be
+       disabled if files are not immutable, i.e. file content may change while file path stays the same.
+   * - sort-writer-max-output-rows
+     - sort_writer_max_output_rows
+     - integer
+     - 1024
+     - Maximum number of rows for sort writer in one batch of output. This is to limit the memory usage of sort writer.
+   * - sort-writer-max-output-bytes
+     - sort_writer_max_output_bytes
+     - string
+     - 10MB
+     - Maximum bytes for sort writer in one batch of output. This is to limit the memory usage of sort writer.
+   * - hive.orc.writer.stripe-max-size
+     - orc_optimized_writer_max_stripe_size
+     - string
+     - 64M
+     - Maximum stripe size in orc writer.
+   * - hive.orc.writer.dictionary-max-memory
+     - orc_optimized_writer_max_dictionary_memory
+     - string
+     - 16M
+     - Maximum dictionary memory that can be used in orc writer.
 
 ``Amazon S3 Configuration``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

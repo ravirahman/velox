@@ -573,6 +573,19 @@ class AggregationNode : public PlanNode {
     return preGroupedKeys_;
   }
 
+  bool isPreGrouped() const {
+    return !preGroupedKeys_.empty() &&
+        std::equal(
+            preGroupedKeys_.begin(),
+            preGroupedKeys_.end(),
+            groupingKeys_.begin(),
+            groupingKeys_.end(),
+            [](const FieldAccessTypedExprPtr& x,
+               const FieldAccessTypedExprPtr& y) -> bool {
+              return (*x == *y);
+            });
+  }
+
   const std::vector<std::string>& aggregateNames() const {
     return aggregateNames_;
   }
@@ -790,6 +803,56 @@ class TableWriteMergeNode : public PlanNode {
   const std::shared_ptr<AggregationNode> aggregationNode_;
   const std::vector<PlanNodePtr> sources_;
   const RowTypePtr outputType_;
+};
+
+/// For each input row, generates N rows with M columns according to
+/// specified 'projections'. 'projections' is an N x M matrix of expressions: a
+/// vector of N rows each having M columns. Each expression is either a column
+/// reference or a constant. Both null and non-null constants are allowed.
+/// 'names' is a list of M new column names. The semantic of this operator
+/// matches Spark.
+class ExpandNode : public PlanNode {
+ public:
+  ExpandNode(
+      PlanNodeId id,
+      std::vector<std::vector<TypedExprPtr>> projections,
+      std::vector<std::string> names,
+      PlanNodePtr source);
+
+  const RowTypePtr& outputType() const override {
+    return outputType_;
+  }
+
+  const RowTypePtr& inputType() const {
+    return sources_[0]->outputType();
+  }
+
+  const std::vector<PlanNodePtr>& sources() const override {
+    return sources_;
+  }
+
+  const std::vector<std::vector<TypedExprPtr>>& projections() const {
+    return projections_;
+  }
+
+  const std::vector<std::string>& names() const {
+    return outputType_->names();
+  }
+
+  std::string_view name() const override {
+    return "Expand";
+  }
+
+  folly::dynamic serialize() const override;
+
+  static PlanNodePtr create(const folly::dynamic& obj, void* context);
+
+ private:
+  void addDetails(std::stringstream& stream) const override;
+
+  const std::vector<PlanNodePtr> sources_;
+  const RowTypePtr outputType_;
+  const std::vector<std::vector<TypedExprPtr>> projections_;
 };
 
 /// Plan node used to implement aggregations over grouping sets. Duplicates the
@@ -1781,8 +1844,8 @@ class LimitNode : public PlanNode {
   // nodes.
   LimitNode(
       const PlanNodeId& id,
-      int32_t offset,
-      int32_t count,
+      int64_t offset,
+      int64_t count,
       bool isPartial,
       const PlanNodePtr& source)
       : PlanNode(id),
@@ -1804,11 +1867,11 @@ class LimitNode : public PlanNode {
     return sources_;
   }
 
-  int32_t offset() const {
+  int64_t offset() const {
     return offset_;
   }
 
-  int32_t count() const {
+  int64_t count() const {
     return count_;
   }
 
@@ -1827,8 +1890,8 @@ class LimitNode : public PlanNode {
  private:
   void addDetails(std::stringstream& stream) const override;
 
-  const int32_t offset_;
-  const int32_t count_;
+  const int64_t offset_;
+  const int64_t count_;
   const bool isPartial_;
   const std::vector<PlanNodePtr> sources_;
 };

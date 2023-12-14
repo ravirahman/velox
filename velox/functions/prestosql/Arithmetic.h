@@ -24,17 +24,19 @@
 #include <functional>
 #include <limits>
 #include <system_error>
+#include <type_traits>
 
 #include "folly/CPortability.h"
 #include "velox/common/base/Exceptions.h"
 #include "velox/functions/Macros.h"
-#include "velox/functions/Udf.h"
 #include "velox/functions/prestosql/ArithmeticImpl.h"
 
 namespace facebook::velox::functions {
 
 inline constexpr int kMinRadix = 2;
 inline constexpr int kMaxRadix = 36;
+inline constexpr long kLongMax = std::numeric_limits<int64_t>::max();
+inline constexpr long kLongMin = std::numeric_limits<int64_t>::min();
 
 inline constexpr char digits[36] = {
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
@@ -70,6 +72,39 @@ struct MultiplyFunction {
   }
 };
 
+// Multiply function for IntervalDayTime * Double and Double * IntervalDayTime.
+template <typename T>
+struct IntervalMultiplyFunction {
+  FOLLY_ALWAYS_INLINE double sanitizeInput(double d) {
+    if UNLIKELY (std::isnan(d)) {
+      return 0;
+    }
+    return d;
+  }
+
+  template <
+      typename T1,
+      typename T2,
+      typename = std::enable_if_t<
+          (std::is_same_v<T1, int64_t> && std::is_same_v<T2, double>) ||
+          (std::is_same_v<T1, double> && std::is_same_v<T2, int64_t>)>>
+  FOLLY_ALWAYS_INLINE void call(int64_t& result, T1 a, T2 b) {
+    double resultDouble;
+    if constexpr (std::is_same_v<T1, double>) {
+      resultDouble = sanitizeInput(a) * b;
+    } else {
+      resultDouble = sanitizeInput(b) * a;
+    }
+    if LIKELY (
+        std::isfinite(resultDouble) && resultDouble >= kLongMin &&
+        resultDouble <= kLongMax) {
+      result = int64_t(resultDouble);
+    } else {
+      result = resultDouble > 0 ? kLongMax : kLongMin;
+    }
+  }
+};
+
 template <typename T>
 struct DivideFunction {
   template <typename TInput>
@@ -83,6 +118,32 @@ struct DivideFunction {
 #endif
   {
     result = a / b;
+  }
+};
+
+template <typename T>
+struct IntervalDivideFunction {
+  FOLLY_ALWAYS_INLINE void call(int64_t& result, int64_t a, double b)
+// Depend on compiler have correct behaviour for divide by zero
+#if defined(__has_feature)
+#if __has_feature(__address_sanitizer__)
+      __attribute__((__no_sanitize__("float-divide-by-zero")))
+      __attribute__((__no_sanitize__("float-cast-overflow")))
+#endif
+#endif
+  {
+    if UNLIKELY (a == 0 || std::isnan(b) || !std::isfinite(b)) {
+      result = 0;
+      return;
+    }
+    double resultDouble = a / b;
+    if LIKELY (
+        std::isfinite(resultDouble) && resultDouble >= kLongMin &&
+        resultDouble <= kLongMax) {
+      result = int64_t(resultDouble);
+    } else {
+      result = resultDouble > 0 ? kLongMax : kLongMin;
+    }
   }
 };
 

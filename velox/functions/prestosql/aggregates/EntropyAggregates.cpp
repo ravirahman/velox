@@ -273,7 +273,7 @@ class EntropyAggregate : public exec::Aggregate {
     for (int32_t i = 0; i < numGroups; ++i) {
       char* group = groups[i];
       if (isNull(group)) {
-        vector->setNull(i, true);
+        rawValues[i] = 0.0;
       } else {
         clearNull(rawNulls, i);
         EntropyAccumulator* accData = accumulator(group);
@@ -336,8 +336,7 @@ void checkRowType(const TypePtr& type, const std::string& errorMessage) {
 
 } // namespace
 
-exec::AggregateRegistrationResult registerEntropyAggregate(
-    const std::string& prefix) {
+void registerEntropyAggregate(const std::string& prefix) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures;
   std::vector<std::string> inputTypes = {"smallint", "integer", "bigint"};
   for (const auto& inputType : inputTypes) {
@@ -349,7 +348,7 @@ exec::AggregateRegistrationResult registerEntropyAggregate(
   }
 
   auto name = prefix + kEntropy;
-  return exec::registerAggregateFunction(
+  exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name](

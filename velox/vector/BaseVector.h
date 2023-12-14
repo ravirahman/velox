@@ -177,6 +177,20 @@ class BaseVector {
     return type_;
   }
 
+  /// Changes vector type. The new type can have a different
+  /// logical representation while maintaining the same physical type.
+  /// Additionally, note that the caller must ensure that this vector is not
+  /// shared, i.e. singly-referenced.
+  virtual void setType(const TypePtr& type) {
+    VELOX_CHECK_NOT_NULL(type);
+    VELOX_CHECK(
+        type_->kindEquals(type),
+        "Cannot change vector type from {} to {}. The old and new types can be different logical types, but the underlying physical types must match.",
+        type_,
+        type);
+    type_ = type;
+  }
+
   TypeKind typeKind() const {
     return typeKind_;
   }
@@ -258,18 +272,16 @@ class BaseVector {
       const BaseVector* other,
       vector_size_t index,
       vector_size_t otherIndex) const {
-    static constexpr CompareFlags kEqualValueAtFlags = {
-        false,
-        false,
-        true /*equalOnly*/,
-        CompareFlags::NullHandlingMode::NoStop /*nullHandlingMode**/};
-    // Will always have value because nullHandlingMode is NoStop.
+    static constexpr CompareFlags kEqualValueAtFlags =
+        CompareFlags::equality(CompareFlags::NullHandlingMode::kNullAsValue);
+
+    // Will always have value because nullHandlingMode is NullAsValue.
     return compare(other, index, otherIndex, kEqualValueAtFlags).value() == 0;
   }
 
   /// Returns true if this vector has the same value at the given index as the
   /// other vector at the other vector's index (including if both are null when
-  /// nullHandlingMode is NoStop), false otherwise. If nullHandlingMode is
+  /// nullHandlingMode is NullAsValue), false otherwise. If nullHandlingMode is
   /// StopAtNull, returns std::nullopt if null encountered.
   virtual std::optional<bool> equalValueAt(
       const BaseVector* other,
@@ -289,7 +301,7 @@ class BaseVector {
   /// than 'other' at 'otherIndex', 0 if equal and > 0 otherwise.
   /// When CompareFlags is DESCENDING, returns < 0 if 'this' at 'index' is
   /// larger than 'other' at 'otherIndex', 0 if equal and < 0 otherwise. If
-  /// flags.nullHandlingMode is not NoStop, the function may returns
+  /// flags.nullHandlingMode is not NullAsValue, the function may returns
   /// std::nullopt if null encountered.
   virtual std::optional<int32_t> compare(
       const BaseVector* other,
@@ -637,28 +649,19 @@ class BaseVector {
     setNulls(nullptr);
   }
 
-  void
-  clearIndices(BufferPtr& indices, vector_size_t start, vector_size_t end) {
-    if (start == end) {
-      return;
-    }
-    auto* data = indices->asMutable<vector_size_t>();
-    std::fill(data + start, data + end, 0);
-  }
-
-  /// Ensures that '*indices' is singly-referenced and has space for 'size'
-  /// elements. Sets elements between the old and new sizes to 0 if
-  /// the new size > old size.
+  /// Ensures that 'indices' is singly-referenced and has space for 'newSize'
+  /// elements. Sets elements between the 'currentSize' and 'newSize' to 0 if
+  /// 'newSize' > 'currentSize'.
   ///
-  /// If '*indices' is nullptr, read-only, not uniquely-referenced, or doesn't
-  /// have capacity for 'size' elements allocates new buffer and copies data to
-  /// it. Updates '*raw' to point to element 0 of
-  /// (*indices)->as<vector_size_t>().
+  /// If 'indices' is nullptr, read-only, not uniquely-referenced, or doesn't
+  /// have capacity for 'newSize' elements allocates new buffer and copies data
+  /// to it. Updates '*rawIndices' to point to the start of 'indices' buffer.
   static void resizeIndices(
-      vector_size_t size,
+      vector_size_t currentSize,
+      vector_size_t newSize,
       velox::memory::MemoryPool* pool,
-      BufferPtr* indices,
-      const vector_size_t** raw);
+      BufferPtr& indices,
+      const vector_size_t** rawIndices);
 
   // Makes sure '*buffer' has space for 'size' items of T and is writable. Sets
   // 'raw' to point to the writable contents of '*buffer'.
@@ -805,9 +808,9 @@ class BaseVector {
   compareNulls(bool thisNull, bool otherNull, CompareFlags flags) {
     DCHECK(thisNull || otherNull);
     switch (flags.nullHandlingMode) {
-      case CompareFlags::NullHandlingMode::StopAtNull:
+      case CompareFlags::NullHandlingMode::kStopAtNull:
         return std::nullopt;
-      case CompareFlags::NullHandlingMode::NoStop:
+      case CompareFlags::NullHandlingMode::kNullAsValue:
       default:
         break;
     }
@@ -879,7 +882,7 @@ class BaseVector {
     return sliceBuffer(*BOOLEAN(), nulls_, offset, length, pool_);
   }
 
-  const TypePtr type_;
+  TypePtr type_;
   const TypeKind typeKind_;
   const VectorEncoding::Simple encoding_;
   BufferPtr nulls_;

@@ -158,6 +158,19 @@ class DateTimeFunctionsTest : public functions::test::FunctionBaseTest {
     return resultVector->as<SimpleVector<StringView>>()->valueAt(0);
   }
 
+  std::optional<std::string> formatDatetimeWithTimezone(
+      std::optional<Timestamp> timestamp,
+      std::optional<std::string> timeZoneName,
+      const std::string& format) {
+    auto resultVector = evaluate(
+        "format_datetime(c0, c1)",
+        makeRowVector(
+            {makeTimestampWithTimeZoneVector(
+                 timestamp.value().toMillis(), timeZoneName.value().c_str()),
+             makeNullableFlatVector<std::string>({format})}));
+    return resultVector->as<SimpleVector<StringView>>()->valueAt(0);
+  }
+
   template <typename T>
   std::optional<T> evaluateWithTimestampWithTimezone(
       const std::string& expression,
@@ -837,7 +850,84 @@ TEST_F(DateTimeFunctionsTest, plusMinusDateIntervalDayTime) {
   EXPECT_THROW(minus(baseDate, partDay), VeloxUserError);
 }
 
-TEST_F(DateTimeFunctionsTest, minusTimestampIntervalDayTime) {
+TEST_F(DateTimeFunctionsTest, plusMinusTimestampIntervalDayTime) {
+  constexpr int64_t kLongMax = std::numeric_limits<int64_t>::max();
+  constexpr int64_t kLongMin = std::numeric_limits<int64_t>::min();
+
+  const auto minus = [&](std::optional<Timestamp> timestamp,
+                         std::optional<int64_t> interval) {
+    return evaluateOnce<Timestamp>(
+        "c0 - c1",
+        makeRowVector({
+            makeNullableFlatVector<Timestamp>({timestamp}),
+            makeNullableFlatVector<int64_t>({interval}, INTERVAL_DAY_TIME()),
+        }));
+  };
+
+  EXPECT_EQ(std::nullopt, minus(std::nullopt, std::nullopt));
+  EXPECT_EQ(std::nullopt, minus(std::nullopt, 1));
+  EXPECT_EQ(std::nullopt, minus(Timestamp(0, 0), std::nullopt));
+  EXPECT_EQ(Timestamp(0, 0), minus(Timestamp(0, 0), 0));
+  EXPECT_EQ(Timestamp(0, 0), minus(Timestamp(10, 0), 10'000));
+  EXPECT_EQ(Timestamp(-10, 0), minus(Timestamp(10, 0), 20'000));
+  EXPECT_EQ(
+      Timestamp(-2, 50 * Timestamp::kNanosecondsInMillisecond),
+      minus(Timestamp(0, 50 * Timestamp::kNanosecondsInMillisecond), 2'000));
+  EXPECT_EQ(
+      Timestamp(-3, 995 * Timestamp::kNanosecondsInMillisecond),
+      minus(Timestamp(0, 0), 2'005));
+  EXPECT_EQ(
+      Timestamp(9223372036854774, 809000000),
+      minus(Timestamp(-1, 0), kLongMax));
+  EXPECT_EQ(
+      Timestamp(-9223372036854775, 192000000),
+      minus(Timestamp(1, 0), kLongMin));
+
+  const auto plusAndVerify = [&](std::optional<Timestamp> timestamp,
+                                 std::optional<int64_t> interval,
+                                 std::optional<Timestamp> expected) {
+    EXPECT_EQ(
+        expected,
+        evaluateOnce<Timestamp>(
+            "c0 + c1",
+            makeRowVector({
+                makeNullableFlatVector<Timestamp>({timestamp}),
+                makeNullableFlatVector<int64_t>(
+                    {interval}, INTERVAL_DAY_TIME()),
+            })));
+    EXPECT_EQ(
+        expected,
+        evaluateOnce<Timestamp>(
+            "c1 + c0",
+            makeRowVector({
+                makeNullableFlatVector<Timestamp>({timestamp}),
+                makeNullableFlatVector<int64_t>(
+                    {interval}, INTERVAL_DAY_TIME()),
+            })));
+  };
+
+  plusAndVerify(std::nullopt, std::nullopt, std::nullopt);
+  plusAndVerify(std::nullopt, 1, std::nullopt);
+  plusAndVerify(Timestamp(0, 0), std::nullopt, std::nullopt);
+  plusAndVerify(Timestamp(0, 0), 0, Timestamp(0, 0));
+  plusAndVerify(Timestamp(0, 0), 10'000, Timestamp(10, 0));
+  plusAndVerify(
+      Timestamp(0, 0),
+      20'005,
+      Timestamp(20, 5 * Timestamp::kNanosecondsInMillisecond));
+  plusAndVerify(
+      Timestamp(0, 0),
+      -30'005,
+      Timestamp(-31, 995 * Timestamp::kNanosecondsInMillisecond));
+  plusAndVerify(
+      Timestamp(1, 0), kLongMax, Timestamp(-9223372036854775, 191000000));
+  plusAndVerify(
+      Timestamp(0, 0), kLongMin, Timestamp(-9223372036854776, 192000000));
+  plusAndVerify(
+      Timestamp(-1, 0), kLongMin, Timestamp(9223372036854774, 808000000));
+}
+
+TEST_F(DateTimeFunctionsTest, minusTimestamp) {
   const auto minus = [&](std::optional<int64_t> t1, std::optional<int64_t> t2) {
     const auto timestamp1 = (t1.has_value()) ? Timestamp(t1.value(), 0)
                                              : std::optional<Timestamp>();
@@ -2824,6 +2914,26 @@ TEST_F(DateTimeFunctionsTest, formatDateTime) {
   EXPECT_THROW(
       formatDatetime(fromTimestampString("1970-01-01"), "'abcd"),
       VeloxUserError);
+}
+
+TEST_F(DateTimeFunctionsTest, formatDateTimeTimezone) {
+  using util::fromTimestampString;
+  auto zeroTs = fromTimestampString("1970-01-01");
+
+  // No timezone set; default to GMT.
+  EXPECT_EQ(
+      "1970-01-01 00:00:00", formatDatetime(zeroTs, "YYYY-MM-dd HH:mm:ss"));
+
+  // Check that string is adjusted to the timezone set.
+  EXPECT_EQ(
+      "1970-01-01 05:30:00",
+      formatDatetimeWithTimezone(
+          zeroTs, "Asia/Kolkata", "YYYY-MM-dd HH:mm:ss"));
+
+  EXPECT_EQ(
+      "1969-12-31 16:00:00",
+      formatDatetimeWithTimezone(
+          zeroTs, "America/Los_Angeles", "YYYY-MM-dd HH:mm:ss"));
 }
 
 TEST_F(DateTimeFunctionsTest, dateFormat) {

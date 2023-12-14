@@ -83,7 +83,7 @@ class DecimalUtil {
   static constexpr uint128_t kInt128Mask = (static_cast<uint128_t>(1) << 127);
 
   FOLLY_ALWAYS_INLINE static void valueInRange(int128_t value) {
-    VELOX_CHECK(
+    VELOX_USER_CHECK(
         (value >= kLongDecimalMin && value <= kLongDecimalMax),
         "Decimal overflow. Value '{}' is not in the range of Decimal Type",
         value);
@@ -232,7 +232,7 @@ class DecimalUtil {
       ++quotient;
     }
     r = quotient * resultSign;
-    return remainder;
+    return remainder * resultSign;
   }
 
   /*
@@ -240,8 +240,8 @@ class DecimalUtil {
    */
   inline static int64_t addUnsignedValues(
       int128_t& sum,
-      const int128_t& lhs,
-      const int128_t& rhs,
+      int128_t lhs,
+      int128_t rhs,
       bool isResultNegative) {
     __uint128_t unsignedSum = (__uint128_t)lhs + (__uint128_t)rhs;
     // Ignore overflow value.
@@ -250,8 +250,20 @@ class DecimalUtil {
     return (unsignedSum >> 127);
   }
 
+  /// Adds two signed 128-bit numbers (int128_t), calculates the sum, and
+  /// returns the overflow. It can be used to track the number of overflow when
+  /// adding a batch of input numbers. It takes lhs and rhs as input, and stores
+  /// their sum in result. overflow == 1 indicates upward overflow. overflow ==
+  /// -1 indicates downward overflow. overflow == 0 indicates no overflow.
+  /// Adding negative and non-negative numbers never overflows, so we can
+  /// directly add them. Adding two negative or two positive numbers may
+  /// overflow. To add numbers that may overflow, first convert both numbers to
+  /// unsigned 128-bit number (uint128_t), and perform the addition. The highest
+  /// bits in the result indicates overflow. Adjust the signs of sum and
+  /// overflow based on the signs of the inputs. The caller must sum up overflow
+  /// values and call adjustSumForOverflow after processing all inputs.
   inline static int64_t
-  addWithOverflow(int128_t& result, const int128_t& lhs, const int128_t& rhs) {
+  addWithOverflow(int128_t& result, int128_t lhs, int128_t rhs) {
     bool isLhsNegative = lhs < 0;
     bool isRhsNegative = rhs < 0;
     int64_t overflow = 0;
@@ -259,6 +271,8 @@ class DecimalUtil {
       // Both inputs of same time.
       if (isLhsNegative) {
         // Both negative, ignore signs and add.
+        VELOX_DCHECK_NE(lhs, std::numeric_limits<int128_t>::min());
+        VELOX_DCHECK_NE(rhs, std::numeric_limits<int128_t>::min());
         overflow = addUnsignedValues(result, -lhs, -rhs, true);
         overflow = -overflow;
       } else {
@@ -271,38 +285,38 @@ class DecimalUtil {
     return overflow;
   }
 
-  /*
-   * Computes average. If there is an overflow value uses the following
-   * expression to compute the average.
-   *                       ---                                         ---
-   *                      |    overflow_multiplier          sum          |
-   * average = overflow * |     -----------------  +  ---------------    |
-   *                      |         count              count * overflow  |
-   *                       ---                                         ---
-   */
-  inline static void computeAverage(
+  /// Corrects the sum result calculated using addWithOverflow. Since the sum
+  /// calculated by addWithOverflow only retains the lower 127 bits,
+  /// it may miss one calculation of +(1 << 127) or -(1 << 127).
+  /// Therefore, we need to make the following adjustments:
+  /// 1. If overflow = 1 && sum < 0, the calculation missed +(1 << 127).
+  /// Add 1 << 127 to the sum.
+  /// 2. If overflow = -1 && sum > 0, the calculation missed -(1 << 127).
+  /// Subtract 1 << 127 to the sum.
+  /// If an overflow indeed occurs and the result cannot be adjusted,
+  /// it will return std::nullopt.
+  inline static std::optional<int128_t> adjustSumForOverflow(
+      int128_t sum,
+      int64_t overflow) {
+    // Value is valid if the conditions below are true.
+    if ((overflow == 1 && sum < 0) || (overflow == -1 && sum > 0)) {
+      return static_cast<int128_t>(
+          DecimalUtil::kOverflowMultiplier * overflow + sum);
+    }
+    if (overflow != 0) {
+      // The actual overflow occurred.
+      return std::nullopt;
+    }
+
+    return sum;
+  }
+
+  /// avg = (sum + overflow * kOverflowMultiplier) / count
+  static void computeAverage(
       int128_t& avg,
       const int128_t& sum,
-      const int64_t count,
-      const int64_t overflow) {
-    if (overflow == 0) {
-      divideWithRoundUp<int128_t, int128_t, int64_t>(
-          avg, sum, count, false, 0, 0);
-    } else {
-      __uint128_t sumA{0};
-      auto remainderA =
-          DecimalUtil::divideWithRoundUp<__uint128_t, __uint128_t, int64_t>(
-              sumA, kOverflowMultiplier, count, true, 0, 0);
-      double totalRemainder = (double)remainderA / count;
-      __uint128_t sumB{0};
-      auto remainderB =
-          DecimalUtil::divideWithRoundUp<__uint128_t, __int128_t, int64_t>(
-              sumB, sum, count * overflow, true, 0, 0);
-      totalRemainder += (double)remainderB / (count * overflow);
-      DecimalUtil::addWithOverflow(avg, sumA, sumB);
-      avg = avg * overflow + (int)(totalRemainder * overflow);
-    }
-  }
+      int64_t count,
+      int64_t overflow);
 
   /// Origins from java side BigInteger#bitLength.
   ///

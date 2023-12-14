@@ -452,4 +452,45 @@ TEST_F(QueryAssertionsTest, nullVariant) {
   assertQuery(plan, "SELECT * FROM tmp");
 }
 
+TEST_F(QueryAssertionsTest, varbinary) {
+  auto data = makeRowVector({makeFlatVector<std::string>(
+      {"Short string", "Longer strings...", "abc"}, VARBINARY())});
+
+  auto rowType = asRowType(data->type());
+
+  createDuckDbTable({data});
+
+  auto duckResult = duckDbQueryRunner_.execute("SELECT * FROM tmp", rowType);
+  ASSERT_EQ(duckResult.size(), data->size());
+  ASSERT_EQ(duckResult.begin()->begin()->kind(), TypeKind::VARBINARY);
+  ASSERT_TRUE(assertEqualResults(duckResult, rowType, {data}));
+
+  auto plan = PlanBuilder().values({data}).planNode();
+  assertQuery(plan, "SELECT * FROM tmp");
+}
+
+TEST_F(QueryAssertionsTest, intervalDayTime) {
+  // INTERVAL_DAY_TIME needs special handling as it is a logical (vs physical)
+  // type mapping to BIGINT. Tests its use as a FLAT vector and in a MAP
+  // serialized to DuckDB to cover the specialized code-paths.
+  auto data = makeRowVector(
+      {makeFlatVector<int64_t>({5, 10, 15, 0}, INTERVAL_DAY_TIME())});
+
+  createDuckDbTable({data});
+  auto plan = PlanBuilder().values({data}).planNode();
+  assertQuery(plan, "SELECT * FROM tmp");
+
+  data = makeRowVector({makeMapVectorFromJson<int64_t, double>(
+      {"null",
+       "{1: 1.1, 2: null}",
+       "{}",
+       "{3: 3.3, 4: 4.4, 5: 5.5}",
+       "null",
+       "{6: null}"},
+      MAP(INTERVAL_DAY_TIME(), DOUBLE()))});
+  createDuckDbTable({data});
+  plan = PlanBuilder().values({data}).planNode();
+  assertQuery(plan, "SELECT * FROM tmp");
+}
+
 } // namespace facebook::velox::test

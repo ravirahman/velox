@@ -27,7 +27,7 @@ struct RowPointers {
   size_t size{0};
 
   void append(char* row, HashStringAllocator& allocator) {
-    ByteStream stream(&allocator);
+    ByteOutputStream stream(&allocator);
     if (firstBlock == nullptr) {
       // Allocate first block.
       currentBlock = allocator.newWrite(stream);
@@ -50,15 +50,12 @@ struct RowPointers {
     }
   }
 
-  std::vector<char*> read(HashStringAllocator& allocator) {
-    ByteStream stream(&allocator);
-    HashStringAllocator::prepareRead(firstBlock, stream);
+  void read(folly::Range<char**> rows) {
+    auto stream = HashStringAllocator::prepareRead(firstBlock);
 
-    std::vector<char*> rows(size);
     for (auto i = 0; i < size; ++i) {
       rows[i] = reinterpret_cast<char*>(stream.read<uintptr_t>());
     }
-    return rows;
   }
 };
 } // namespace
@@ -127,8 +124,9 @@ Accumulator SortedAggregations::accumulator() const {
       sizeof(RowPointers),
       false,
       1,
-      [](folly::Range<char**> /*groups*/, VectorPtr& /*result*/) {
-        VELOX_UNREACHABLE();
+      ARRAY(VARBINARY()),
+      [this](folly::Range<char**> groups, VectorPtr& result) {
+        extractForSpill(groups, result);
       },
       [this](folly::Range<char**> groups) {
         for (auto* group : groups) {
@@ -136,6 +134,45 @@ Accumulator SortedAggregations::accumulator() const {
           accumulator->free(*allocator_);
         }
       }};
+}
+
+void SortedAggregations::extractForSpill(
+    folly::Range<char**> groups,
+    VectorPtr& result) const {
+  auto* arrayVector = result->as<ArrayVector>();
+  arrayVector->resize(groups.size());
+
+  auto* rawOffsets =
+      arrayVector->mutableOffsets(groups.size())->asMutable<vector_size_t>();
+  auto* rawSizes =
+      arrayVector->mutableSizes(groups.size())->asMutable<vector_size_t>();
+
+  vector_size_t offset = 0;
+  for (auto i = 0; i < groups.size(); ++i) {
+    auto* accumulator = reinterpret_cast<RowPointers*>(groups[i] + offset_);
+    rawSizes[i] = accumulator->size;
+    rawOffsets[i] = offset;
+    offset += accumulator->size;
+  }
+
+  std::vector<char*> groupRows(offset);
+
+  offset = 0;
+  for (auto i = 0; i < groups.size(); ++i) {
+    auto* accumulator = reinterpret_cast<RowPointers*>(groups[i] + offset_);
+    accumulator->read(
+        folly::Range(groupRows.data() + offset, accumulator->size));
+    offset += accumulator->size;
+  }
+
+  auto& elementsVector = arrayVector->elements();
+  elementsVector->resize(offset);
+  inputData_->extractSerializedRows(
+      folly::Range(groupRows.data(), groupRows.size()), elementsVector);
+}
+
+void SortedAggregations::clear() {
+  inputData_->clear();
 }
 
 void SortedAggregations::initializeNewGroups(
@@ -195,6 +232,22 @@ void SortedAggregations::addSingleGroupInput(
   }
 }
 
+void SortedAggregations::addSingleGroupSpillInput(
+    char* group,
+    const VectorPtr& input,
+    vector_size_t index) {
+  auto* arrayVector = input->as<ArrayVector>();
+  auto* elementsVector = arrayVector->elements()->asFlatVector<StringView>();
+
+  const auto size = arrayVector->sizeAt(index);
+  const auto offset = arrayVector->offsetAt(index);
+  for (auto i = 0; i < size; ++i) {
+    char* newRow = inputData_->newRow();
+    inputData_->storeSerializedRow(*elementsVector, offset + i, newRow);
+    addNewRow(group, newRow);
+  }
+}
+
 bool SortedAggregations::compareRowsWithKeys(
     const char* lhs,
     const char* rhs,
@@ -213,8 +266,6 @@ bool SortedAggregations::compareRowsWithKeys(
   }
   return false;
 }
-
-void SortedAggregations::noMoreInput() {}
 
 void SortedAggregations::sortSingleGroup(
     std::vector<char*>& groupRows,
@@ -294,6 +345,7 @@ void SortedAggregations::extractValues(
     const RowVectorPtr& result) {
   raw_vector<int32_t> temp;
   SelectivityVector rows;
+  std::vector<char*> groupRows;
   for (const auto& [sortingSpec, aggregates] : aggregates_) {
     std::vector<VectorPtr> inputVectors;
     size_t numInputColumns = 0;
@@ -304,8 +356,9 @@ void SortedAggregations::extractValues(
 
     // For each group, sort inputs, add them to aggregate.
     for (auto* group : groups) {
-      auto groupRows =
-          reinterpret_cast<RowPointers*>(group + offset_)->read(*allocator_);
+      auto* accumulator = reinterpret_cast<RowPointers*>(group + offset_);
+      groupRows.resize(accumulator->size);
+      accumulator->read(folly::Range(groupRows.data(), groupRows.size()));
 
       sortSingleGroup(groupRows, sortingSpec);
 

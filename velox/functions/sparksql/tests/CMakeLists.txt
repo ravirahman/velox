@@ -23,7 +23,9 @@ add_executable(
   DateTimeFunctionsTest.cpp
   DecimalArithmeticTest.cpp
   DecimalCompareTest.cpp
+  DecimalRoundTest.cpp
   DecimalUtilTest.cpp
+  MakeDecimalTest.cpp
   ElementAtTest.cpp
   HashTest.cpp
   InTest.cpp
@@ -36,6 +38,7 @@ add_executable(
   SortArrayTest.cpp
   SplitFunctionsTest.cpp
   StringTest.cpp
+  StringToMapTest.cpp
   UnscaledValueFunctionTest.cpp
   XxHash64Test.cpp)
 

@@ -68,9 +68,13 @@ class Task : public std::enable_shared_from_this<Task> {
   ~Task();
 
   /// Specify directory to which data will be spilled if spilling is enabled and
-  /// required.
-  void setSpillDirectory(const std::string& spillDirectory) {
+  /// required. Set 'alreadyCreated' to true if the directory has already been
+  /// created by the caller.
+  void setSpillDirectory(
+      const std::string& spillDirectory,
+      bool alreadyCreated = true) {
     spillDirectory_ = spillDirectory;
+    spillDirectoryCreated_ = alreadyCreated;
   }
 
   std::string toString() const;
@@ -127,15 +131,6 @@ class Task : public std::enable_shared_from_this<Task> {
   /// nodes require splits and there are not enough of these.
   /// @param concurrentSplitGroups In grouped execution, maximum number of
   /// splits groups processed concurrently.
-#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
-  static void start(
-      std::shared_ptr<Task> self,
-      uint32_t maxDrivers,
-      uint32_t concurrentSplitGroups = 1) {
-    self->start(maxDrivers, concurrentSplitGroups);
-  }
-#endif
-
   void start(uint32_t maxDrivers, uint32_t concurrentSplitGroups = 1);
 
   /// If this returns true, this Task supports the single-threaded execution API
@@ -584,6 +579,12 @@ class Task : public std::enable_shared_from_this<Task> {
     return spillDirectory_;
   }
 
+  /// Returns the spill directory path. Ensures that the spill directory is
+  /// created before returning. Is thread safe. Returns an empty string if
+  /// either the spill directory is not specified during task creation or the
+  /// folder could not be created.
+  const std::string& getOrCreateSpillDirectory();
+
   /// True if produces output via OutputBufferManager.
   bool hasPartitionedOutput() const {
     return numDriversInPartitionedOutput_ > 0;
@@ -591,6 +592,11 @@ class Task : public std::enable_shared_from_this<Task> {
 
   /// Invoked to run provided 'callback' on each alive driver of the task.
   void testingVisitDrivers(const std::function<void(Driver*)>& callback);
+
+  /// Invoked to finish the task for test purpose.
+  void testingFinish() {
+    terminate(TaskState::kFinished).wait();
+  }
 
  private:
   Task(
@@ -683,6 +689,7 @@ class Task : public std::enable_shared_from_this<Task> {
     uint64_t reclaim(
         memory::MemoryPool* pool,
         uint64_t targetBytes,
+        uint64_t maxWaitMs,
         memory::MemoryReclaimer::Stats& stats) override;
 
     void abort(memory::MemoryPool* pool, const std::exception_ptr& error)
@@ -1039,6 +1046,13 @@ class Task : public std::enable_shared_from_this<Task> {
 
   // Base spill directory for this task.
   std::string spillDirectory_;
+
+  // Mutex to ensure only the first caller thread of 'getOrCreateSpillDirectory'
+  // creates the directory.
+  mutable std::mutex spillDirCreateMutex_;
+
+  // Indicates whether the spill directory has been created.
+  std::atomic<bool> spillDirectoryCreated_{false};
 };
 
 /// Listener invoked on task completion.

@@ -24,6 +24,7 @@
 #include "velox/core/QueryCtx.h"
 #include "velox/vector/arrow/Bridge.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
+#include "velox/vector/tests/utils/VectorTestBase.h"
 
 namespace facebook::velox::test {
 namespace {
@@ -663,6 +664,28 @@ TEST_F(ArrowBridgeArrayExportTest, arrayCrossValidate) {
   }
 }
 
+TEST_F(ArrowBridgeArrayExportTest, arrayDictionary) {
+  auto vec = ({
+    auto indices = makeBuffer<vector_size_t>({1, 2, 0});
+    auto wrapped = vectorMaker_.flatVector<int64_t>({1, 2, 3});
+    auto inner = BaseVector::wrapInDictionary(nullptr, indices, 3, wrapped);
+    auto offsets = makeBuffer<vector_size_t>({2, 0});
+    auto sizes = makeBuffer<vector_size_t>({1, 1});
+    std::make_shared<ArrayVector>(
+        pool_.get(), ARRAY(inner->type()), nullptr, 2, offsets, sizes, inner);
+  });
+
+  ArrowSchema schema;
+  ArrowArray data;
+  velox::exportToArrow(vec, schema);
+  velox::exportToArrow(vec, data, vec->pool());
+
+  auto result = importFromArrowAsViewer(schema, data, vec->pool());
+  test::assertEqualVectors(result, vec);
+  schema.release(&schema);
+  data.release(&data);
+}
+
 TEST_F(ArrowBridgeArrayExportTest, arrayGap) {
   auto elements = vectorMaker_.flatVector<int64_t>({1, 2, 3, 4, 5});
   elements->setNull(3, true);
@@ -881,6 +904,33 @@ TEST_F(ArrowBridgeArrayExportTest, constantComplex) {
   vector = BaseVector::wrapInConstant(100, 0, innerArray);
   testConstantVector<false, int64_t>(
       vector, std::vector<std::optional<int64_t>>{1, 2, 3});
+}
+
+TEST_F(ArrowBridgeArrayExportTest, constantCrossValidate) {
+  auto vector =
+      BaseVector::createConstant(VARCHAR(), "hello", 100, pool_.get());
+  auto array = toArrow(vector, pool_.get());
+
+  ASSERT_OK(array->ValidateFull());
+  EXPECT_EQ(array->null_count(), 0);
+  ASSERT_EQ(
+      *array->type(), *arrow::run_end_encoded(arrow::int32(), arrow::utf8()));
+  const auto& reeArray = static_cast<const arrow::RunEndEncodedArray&>(*array);
+
+  const auto& runEnds = reeArray.run_ends();
+  const auto& values = reeArray.values();
+
+  ASSERT_EQ(*runEnds->type(), *arrow::int32());
+  ASSERT_EQ(*values->type(), *arrow::utf8());
+
+  const auto& valuesArray = static_cast<const arrow::StringArray&>(*values);
+  const auto& runEndsArray = static_cast<const arrow::Int32Array&>(*runEnds);
+
+  ASSERT_EQ(valuesArray.length(), 1);
+  ASSERT_EQ(runEndsArray.length(), 1);
+
+  EXPECT_EQ(valuesArray.GetString(0), std::string("hello"));
+  EXPECT_EQ(runEndsArray.Value(0), 100);
 }
 
 class ArrowBridgeArrayImportTest : public ArrowBridgeArrayExportTest {

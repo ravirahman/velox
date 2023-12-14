@@ -41,7 +41,7 @@ class SortWindowBuild : public WindowBuild {
 
   void spill() override;
 
-  std::optional<SpillStats> spilledStats() const override {
+  std::optional<common::SpillStats> spilledStats() const override {
     if (spiller_ == nullptr) {
       return std::nullopt;
     }
@@ -80,6 +80,8 @@ class SortWindowBuild : public WindowBuild {
   //
   // Used to sort 'data_' while spilling.
   const std::vector<CompareFlags> spillCompareFlags_;
+
+  memory::MemoryPool* const pool_;
 
   // allKeyInfo_ is a combination of (partitionKeyInfo_ and sortKeyInfo_).
   // It is used to perform a full sorting of the input rows to be able to

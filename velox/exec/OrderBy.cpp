@@ -26,7 +26,7 @@ CompareFlags fromSortOrderToCompareFlags(const core::SortOrder& sortOrder) {
       sortOrder.isNullsFirst(),
       sortOrder.isAscending(),
       false,
-      CompareFlags::NullHandlingMode::NoStop};
+      CompareFlags::NullHandlingMode::kNullAsValue};
 }
 } // namespace
 
@@ -43,6 +43,7 @@ OrderBy::OrderBy(
           orderByNode->canSpill(driverCtx->queryConfig())
               ? driverCtx->makeSpillConfig(operatorId)
               : std::nullopt) {
+  maxOutputRows_ = outputBatchRows(std::nullopt);
   VELOX_CHECK(pool()->trackUsage());
   std::vector<column_index_t> sortColumnIndices;
   std::vector<CompareFlags> sortCompareFlags;
@@ -62,12 +63,8 @@ OrderBy::OrderBy(
       outputType_,
       sortColumnIndices,
       sortCompareFlags,
-      outputBatchRows(), // TODO(gaoge): Move to where we can estimate the
-                         // average row size and set the output batch rows based
-                         // on it.
       pool(),
       &nonReclaimableSection_,
-      &numSpillRuns_,
       spillConfig_.has_value() ? &(spillConfig_.value()) : nullptr,
       operatorCtx_->driverCtx()->queryConfig().orderBySpillMemoryThreshold());
 }
@@ -81,24 +78,11 @@ void OrderBy::reclaim(
     memory::MemoryReclaimer::Stats& stats) {
   VELOX_CHECK(canReclaim());
   VELOX_CHECK(!nonReclaimableSection_);
-  auto* driver = operatorCtx_->driver();
 
-  // NOTE: an order by operator is reclaimable if it hasn't started output
-  // processing and is not under non-reclaimable execution section.
-  if (noMoreInput_) {
-    // TODO: reduce the log frequency if it is too verbose.
-    ++stats.numNonReclaimableAttempts;
-    LOG(WARNING)
-        << "Can't reclaim from order by operator which has started producing output: "
-        << pool()->name()
-        << ", usage: " << succinctBytes(pool()->currentBytes())
-        << ", reservation: " << succinctBytes(pool()->reservedBytes());
-    return;
-  }
-
-  // TODO: support fine-grain disk spilling based on 'targetBytes' after having
-  // row container memory compaction support later.
+  // TODO: support fine-grain disk spilling based on 'targetBytes' after
+  // having row container memory compaction support later.
   sortBuffer_->spill();
+
   // Release the minimum reserved memory.
   pool()->release();
 }
@@ -106,7 +90,7 @@ void OrderBy::reclaim(
 void OrderBy::noMoreInput() {
   Operator::noMoreInput();
   sortBuffer_->noMoreInput();
-
+  maxOutputRows_ = outputBatchRows(sortBuffer_->estimateOutputRowSize());
   recordSpillStats();
 }
 
@@ -115,7 +99,7 @@ RowVectorPtr OrderBy::getOutput() {
     return nullptr;
   }
 
-  RowVectorPtr output = sortBuffer_->getOutput();
+  RowVectorPtr output = sortBuffer_->getOutput(maxOutputRows_);
   finished_ = (output == nullptr);
   return output;
 }
@@ -127,7 +111,7 @@ void OrderBy::abort() {
 
 void OrderBy::recordSpillStats() {
   VELOX_CHECK_NOT_NULL(sortBuffer_);
-  const auto spillStats = sortBuffer_->spilledStats();
+  auto spillStats = sortBuffer_->spilledStats();
   if (spillStats.has_value()) {
     Operator::recordSpillStats(spillStats.value());
   }

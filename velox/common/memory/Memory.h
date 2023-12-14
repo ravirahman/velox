@@ -93,6 +93,9 @@ struct MemoryManagerOptions {
   /// testing purpose.
   bool debugEnabled{FLAGS_velox_memory_pool_debug_enabled};
 
+  /// Terminates the process and generates a core file on an allocation failure
+  bool coreOnAllocationFailureEnabled{false};
+
   /// Specifies the backing memory allocator.
   MemoryAllocator* allocator{MemoryAllocator::getInstance()};
 
@@ -110,6 +113,11 @@ struct MemoryManagerOptions {
   /// The minimal memory capacity to transfer out of or into a memory pool
   /// during the memory arbitration.
   uint64_t memoryPoolTransferCapacity{32 << 20};
+
+  /// Specifies the max time to wait for memory reclaim by arbitration. The
+  /// memory reclaim might fail if the max wait time has exceeded. If it is
+  /// zero, then there is no timeout. The default is 5 mins.
+  uint64_t memoryReclaimWaitMs{300'000};
 
   /// Provided by the query system to validate the state after a memory pool
   /// enters arbitration if not null. For instance, Prestissimo provides
@@ -190,8 +198,10 @@ class MemoryManager {
 
   MemoryArbitrator* arbitrator();
 
-  /// Returns debug string of this memory manager.
-  std::string toString() const;
+  /// Returns debug string of this memory manager. If 'detail' is true, it
+  /// returns the detailed tree memory usage from all the top level root memory
+  /// pools.
+  std::string toString(bool detail = false) const;
 
   /// Returns the memory manger's internal default root memory pool for testing
   /// purpose.
@@ -221,7 +231,8 @@ class MemoryManager {
   const uint16_t alignment_;
   const bool checkUsageLeak_;
   const bool debugEnabled_;
-  // The destruction callback set for the allocated  root memory pools which are
+  const bool coreOnAllocationFailureEnabled_;
+  // The destruction callback set for the allocated root memory pools which are
   // tracked by 'pools_'. It is invoked on the root pool destruction and removes
   // the pool from 'pools_'.
   const MemoryPoolImpl::DestructionCallback poolDestructionCb_;

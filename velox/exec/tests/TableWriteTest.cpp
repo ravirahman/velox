@@ -21,6 +21,7 @@
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/connectors/hive/HivePartitionFunction.h"
 #include "velox/dwio/common/WriterFactory.h"
+#include "velox/exec/PlanNodeStats.h"
 #include "velox/exec/TableWriter.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
@@ -30,6 +31,7 @@
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 
 #include <re2/re2.h>
+#include <string>
 
 using namespace facebook::velox;
 using namespace facebook::velox::core;
@@ -1072,8 +1074,10 @@ class PartitionedTableWriterTest
   static std::vector<uint64_t> getTestParams() {
     std::vector<uint64_t> testParams;
     const std::vector<bool> multiDriverOptions = {false, true};
-    // Add Parquet with https://github.com/facebookincubator/velox/issues/5560
     std::vector<FileFormat> fileFormats = {FileFormat::DWRF};
+    if (hasWriterFactory(FileFormat::PARQUET)) {
+      fileFormats.push_back(FileFormat::PARQUET);
+    }
     for (bool multiDrivers : multiDriverOptions) {
       for (FileFormat fileFormat : fileFormats) {
         testParams.push_back(TestParam{
@@ -1184,8 +1188,10 @@ class BucketedTableOnlyWriteTest
   static std::vector<uint64_t> getTestParams() {
     std::vector<uint64_t> testParams;
     const std::vector<bool> multiDriverOptions = {false, true};
-    // Add Parquet with https://github.com/facebookincubator/velox/issues/5560
     std::vector<FileFormat> fileFormats = {FileFormat::DWRF};
+    if (hasWriterFactory(FileFormat::PARQUET)) {
+      fileFormats.push_back(FileFormat::PARQUET);
+    }
     for (bool multiDrivers : multiDriverOptions) {
       for (FileFormat fileFormat : fileFormats) {
         testParams.push_back(TestParam{
@@ -1312,8 +1318,10 @@ class PartitionedWithoutBucketTableWriterTest
   static std::vector<uint64_t> getTestParams() {
     std::vector<uint64_t> testParams;
     const std::vector<bool> multiDriverOptions = {false, true};
-    // Add Parquet with https://github.com/facebookincubator/velox/issues/5560
     std::vector<FileFormat> fileFormats = {FileFormat::DWRF};
+    if (hasWriterFactory(FileFormat::PARQUET)) {
+      fileFormats.push_back(FileFormat::PARQUET);
+    }
     for (bool multiDrivers : multiDriverOptions) {
       for (FileFormat fileFormat : fileFormats) {
         testParams.push_back(TestParam{
@@ -1348,8 +1356,10 @@ class AllTableWriterTest : public TableWriteTest,
   static std::vector<uint64_t> getTestParams() {
     std::vector<uint64_t> testParams;
     const std::vector<bool> multiDriverOptions = {false, true};
-    // Add Parquet with https://github.com/facebookincubator/velox/issues/5560
     std::vector<FileFormat> fileFormats = {FileFormat::DWRF};
+    if (hasWriterFactory(FileFormat::PARQUET)) {
+      fileFormats.push_back(FileFormat::PARQUET);
+    }
     for (bool multiDrivers : multiDriverOptions) {
       for (FileFormat fileFormat : fileFormats) {
         testParams.push_back(TestParam{
@@ -2027,9 +2037,9 @@ TEST_P(PartitionedTableWriterTest, maxPartitions) {
   if (testMode_ == TestMode::kPartitioned) {
     VELOX_ASSERT_THROW(
         AssertQueryBuilder(plan)
-            .connectorConfig(
+            .connectorSessionProperty(
                 kHiveConnectorId,
-                HiveConfig::kMaxPartitionsPerWriters,
+                HiveConfig::kMaxPartitionsPerWritersSession,
                 folly::to<std::string>(maxPartitions))
             .copyResults(pool()),
         fmt::format(
@@ -2037,9 +2047,9 @@ TEST_P(PartitionedTableWriterTest, maxPartitions) {
   } else {
     VELOX_ASSERT_THROW(
         AssertQueryBuilder(plan)
-            .connectorConfig(
+            .connectorSessionProperty(
                 kHiveConnectorId,
-                HiveConfig::kMaxPartitionsPerWriters,
+                HiveConfig::kMaxPartitionsPerWritersSession,
                 folly::to<std::string>(maxPartitions))
             .copyResults(pool()),
         "Exceeded open writer limit");
@@ -2186,9 +2196,9 @@ TEST_P(UnpartitionedTableWriterTest, runtimeStatsCheck) {
     const std::shared_ptr<Task> task =
         AssertQueryBuilder(plan, duckDbQueryRunner_)
             .config(QueryConfig::kTaskWriterCount, std::to_string(1))
-            .connectorConfig(
+            .connectorSessionProperty(
                 kHiveConnectorId,
-                HiveConfig::kOrcWriterMaxStripeSize,
+                HiveConfig::kOrcWriterMaxStripeSizeSession,
                 testData.maxStripeSize)
             .assertResults("SELECT count(*) FROM tmp");
     auto stats = task->taskStats().pipelineStats.front().operatorStats;
@@ -2228,9 +2238,9 @@ TEST_P(UnpartitionedTableWriterTest, immutableSettings) {
     std::unordered_map<std::string, std::string> propFromFile{
         {"hive.immutable-partitions",
          testData.immutablePartitionsEnabled ? "true" : "false"}};
-    std::shared_ptr<const Config> connectorProperties{
+    std::shared_ptr<const Config> config{
         std::make_shared<core::MemConfig>(propFromFile)};
-    resetHiveConnector(connectorProperties);
+    resetHiveConnector(config);
 
     auto input = makeVectors(10, 10);
     auto outputDirectory = TempDirectoryPath::create();
@@ -2301,9 +2311,9 @@ TEST_P(BucketedTableOnlyWriteTest, bucketCountLimit) {
     if (testData.expectedError) {
       VELOX_ASSERT_THROW(
           AssertQueryBuilder(plan)
-              .connectorConfig(
+              .connectorSessionProperty(
                   kHiveConnectorId,
-                  HiveConfig::kMaxPartitionsPerWriters,
+                  HiveConfig::kMaxPartitionsPerWritersSession,
                   // Make sure we have a sufficient large writer limit.
                   folly::to<std::string>(testData.bucketCount * 2))
               .copyResults(pool()),
@@ -3037,15 +3047,15 @@ DEBUG_ONLY_TEST_P(UnpartitionedTableWriterTest, dataSinkAbortError) {
         VELOX_FAIL("inject writer error");
       }));
 
-  std::atomic<bool> triggerCloseErrorOnce{true};
+  std::atomic<bool> triggerAbortErrorOnce{true};
   SCOPED_TESTVALUE_SET(
-      "facebook::velox::connector::hive::HiveDataSink::close",
+      "facebook::velox::connector::hive::HiveDataSink::closeInternal",
       std::function<void(const HiveDataSink*)>(
           [&](const HiveDataSink* /*unused*/) {
-            if (!triggerCloseErrorOnce.exchange(false)) {
+            if (!triggerAbortErrorOnce.exchange(false)) {
               return;
             }
-            VELOX_FAIL("inject close error");
+            VELOX_FAIL("inject abort error");
           }));
 
   auto outputDirectory = TempDirectoryPath::create();
@@ -3055,6 +3065,8 @@ DEBUG_ONLY_TEST_P(UnpartitionedTableWriterTest, dataSinkAbortError) {
                   .planNode();
   VELOX_ASSERT_THROW(
       AssertQueryBuilder(plan).copyResults(pool()), "inject writer error");
+  ASSERT_FALSE(triggerWriterErrorOnce);
+  ASSERT_FALSE(triggerAbortErrorOnce);
 }
 
 TEST_P(BucketSortOnlyTableWriterTest, sortWriterSpill) {
@@ -3076,12 +3088,108 @@ TEST_P(BucketSortOnlyTableWriterTest, sortWriterSpill) {
       commitStrategy_);
 
   const auto spillStats = globalSpillStats();
-  assertQueryWithWriterConfigs(op, fmt::format("SELECT {}", 5 * 500), true);
+  auto task =
+      assertQueryWithWriterConfigs(op, fmt::format("SELECT {}", 5 * 500), true);
   verifyTableWriterOutput(outputDirectory->path, rowType_);
-  // TODO: add to check task spill stats later.
   const auto updatedSpillStats = globalSpillStats();
   ASSERT_GT(updatedSpillStats.spilledBytes, spillStats.spilledBytes);
   ASSERT_GT(updatedSpillStats.spilledPartitions, spillStats.spilledPartitions);
+  auto taskStats = exec::toPlanStats(task->taskStats());
+  auto& stats = taskStats.at(tableWriteNodeId_);
+  ASSERT_GT(stats.spilledRows, 0);
+  ASSERT_GT(stats.spilledBytes, 0);
+  // One spilled partition per each written files.
+  const int numWrittenFiles = stats.customStats["numWrittenFiles"].sum;
+  ASSERT_GE(stats.spilledPartitions, numWrittenFiles);
+  ASSERT_GT(stats.customStats["spillRuns"].sum, 0);
+  ASSERT_GT(stats.customStats["spillFillTime"].sum, 0);
+  ASSERT_GT(stats.customStats["spillSortTime"].sum, 0);
+  ASSERT_GT(stats.customStats["spillSerializationTime"].sum, 0);
+  ASSERT_GT(stats.customStats["spillFlushTime"].sum, 0);
+  ASSERT_GT(stats.customStats["spillDiskWrites"].sum, 0);
+  ASSERT_GT(stats.customStats["spillWriteTime"].sum, 0);
+}
+
+DEBUG_ONLY_TEST_P(BucketSortOnlyTableWriterTest, outputBatchRows) {
+  struct {
+    uint32_t maxOutputRows;
+    std::string maxOutputBytes;
+    int expectedOutputCount;
+
+    // TODO: add output size check with spilling enabled
+    std::string debugString() const {
+      return fmt::format(
+          "maxOutputRows: {}, maxOutputBytes: {}, expectedOutputCount: {}",
+          maxOutputRows,
+          maxOutputBytes,
+          expectedOutputCount);
+    }
+  } testSettings[] = {// we have 4 buckets thus 4 writers.
+                      {10000, "1000KB", 4},
+                      // when maxOutputRows = 1, 1000 rows triggers 1000 writes
+                      {1, "1KB", 1000},
+                      // estimatedRowSize is ~62bytes, when maxOutputSize = 62 *
+                      // 100, 1000 rows triggers ~10 writes
+                      {10000, "6200B", 12}};
+
+  for (const auto& testData : testSettings) {
+    SCOPED_TRACE(testData.debugString());
+    std::atomic_int outputCount{0};
+    SCOPED_TESTVALUE_SET(
+        "facebook::velox::dwrf::Writer::write",
+        std::function<void(dwrf::Writer*)>(
+            [&](dwrf::Writer* /*unused*/) { ++outputCount; }));
+
+    auto rowType =
+        ROW({"c0", "p0", "c1", "c3", "c4", "c5"},
+            {VARCHAR(), BIGINT(), INTEGER(), REAL(), DOUBLE(), VARCHAR()});
+    std::vector<std::string> partitionKeys = {"p0"};
+
+    // Partition vector is constant vector.
+    std::vector<RowVectorPtr> vectors = makeBatches(1, [&](auto) {
+      return makeRowVector(
+          rowType->names(),
+          {makeFlatVector<StringView>(
+               1'000,
+               [&](auto row) {
+                 return StringView::makeInline(fmt::format("str_{}", row));
+               }),
+           makeConstant((int64_t)365, 1'000),
+           makeConstant((int32_t)365, 1'000),
+           makeFlatVector<float>(1'000, [&](auto row) { return row + 33.23; }),
+           makeFlatVector<double>(1'000, [&](auto row) { return row + 33.23; }),
+           makeFlatVector<StringView>(1'000, [&](auto row) {
+             return StringView::makeInline(fmt::format("bucket_{}", row * 3));
+           })});
+    });
+    createDuckDbTable(vectors);
+
+    auto outputDirectory = TempDirectoryPath::create();
+    auto plan = createInsertPlan(
+        PlanBuilder().values({vectors}),
+        rowType,
+        outputDirectory->path,
+        partitionKeys,
+        bucketProperty_,
+        compressionKind_,
+        1,
+        connector::hive::LocationHandle::TableType::kNew,
+        commitStrategy_);
+    const std::shared_ptr<Task> task =
+        AssertQueryBuilder(plan, duckDbQueryRunner_)
+            .config(QueryConfig::kTaskWriterCount, std::to_string(1))
+            .connectorSessionProperty(
+                kHiveConnectorId,
+                HiveConfig::kSortWriterMaxOutputRowsSession,
+                folly::to<std::string>(testData.maxOutputRows))
+            .connectorSessionProperty(
+                kHiveConnectorId,
+                HiveConfig::kSortWriterMaxOutputBytesSession,
+                folly::to<std::string>(testData.maxOutputBytes))
+            .assertResults("SELECT count(*) FROM tmp");
+    auto stats = task->taskStats().pipelineStats.front().operatorStats;
+    ASSERT_EQ(outputCount, testData.expectedOutputCount);
+  }
 }
 
 VELOX_INSTANTIATE_TEST_SUITE_P(

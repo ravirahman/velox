@@ -53,13 +53,15 @@ class ParquetTpchTest : public testing::Test {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(
+                kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
 
     auto tpchConnector =
         connector::getConnectorFactory(
             connector::tpch::TpchConnectorFactory::kTpchConnectorName)
-            ->newConnector(kTpchConnectorId, nullptr);
+            ->newConnector(
+                kTpchConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(tpchConnector);
 
     saveTpchTablesAsParquet();
@@ -85,7 +87,7 @@ class ParquetTpchTest : public testing::Test {
       auto tableSchema = tpch::getTableSchema(table);
       auto columnNames = tableSchema->names();
       auto plan = PlanBuilder()
-                      .tableScan(table, std::move(columnNames), 0.01)
+                      .tpchTableScan(table, std::move(columnNames), 0.01)
                       .planNode();
       auto split =
           exec::Split(std::make_shared<connector::tpch::TpchConnectorSplit>(

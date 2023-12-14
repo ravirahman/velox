@@ -18,6 +18,7 @@ add_library(
   AggregateCompanionAdapter.cpp
   AggregateCompanionSignatures.cpp
   AggregateFunctionRegistry.cpp
+  AggregateInfo.cpp
   AggregationMasks.cpp
   AggregateWindow.cpp
   ArrowStream.cpp
@@ -29,6 +30,7 @@ add_library(
   ExchangeClient.cpp
   ExchangeQueue.cpp
   ExchangeSource.cpp
+  Expand.cpp
   FilterProject.cpp
   GroupId.cpp
   GroupingSet.cpp
@@ -64,6 +66,7 @@ add_library(
   SortedAggregations.cpp
   SortWindowBuild.cpp
   Spill.cpp
+  SpillFile.cpp
   SpillOperatorGroup.cpp
   Spiller.cpp
   StreamingAggregation.cpp
@@ -107,3 +110,5 @@ endif()
 if(${VELOX_ENABLE_BENCHMARKS})
   add_subdirectory(benchmarks)
 endif()
+
+add_subdirectory(prefixsort)

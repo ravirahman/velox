@@ -165,6 +165,7 @@ class TableWriter : public Operator {
     uint64_t reclaim(
         memory::MemoryPool* pool,
         uint64_t targetBytes,
+        uint64_t maxWaitMs,
         memory::MemoryReclaimer::Stats& stats) override;
 
     void abort(memory::MemoryPool* pool, const std::exception_ptr& /* error */)
@@ -186,11 +187,7 @@ class TableWriter : public Operator {
 
   void abortDataSink();
 
-  // Updates physicalWrittenBytes in OperatorStats with current written bytes.
-  void updateWrittenBytes();
-
-  // Updates numWrittenFiles in runtimeStats.
-  void updateNumWrittenFiles();
+  void updateStats(const connector::DataSink::Stats& stats);
 
   std::string createTableCommitContext(bool lastOutput);
 

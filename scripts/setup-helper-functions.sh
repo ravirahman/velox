@@ -99,7 +99,7 @@ function get_cxx_flags {
   case $CPU_ARCH in
 
     "arm64")
-      echo -n "-mcpu=apple-m1+crc -std=c++17 -fvisibility=hidden $ADDITIONAL_FLAGS"
+      echo -n "-std=c++17 -fvisibility=hidden $ADDITIONAL_FLAGS"
     ;;
 
     "avx")

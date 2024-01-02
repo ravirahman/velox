@@ -184,7 +184,6 @@ void registerFunctions(const std::string& prefix) {
       prefix + "regexp_extract", re2ExtractSignatures(), makeRegexExtract);
   exec::registerStatefulVectorFunction(
       prefix + "rlike", re2SearchSignatures(), makeRLike);
-  registerRegexReplace(prefix);
   VELOX_REGISTER_VECTOR_FUNCTION(udf_regexp_split, prefix + "split");
 
   exec::registerStatefulVectorFunction(
@@ -285,6 +284,8 @@ void registerFunctions(const std::string& prefix) {
   registerFunction<QuarterFunction, int32_t, Date>({prefix + "quarter"});
 
   registerFunction<MonthFunction, int32_t, Date>({prefix + "month"});
+
+  registerFunction<NextDayFunction, Date, Date, Varchar>({prefix + "next_day"});
 
   // Register bloom filter function
   registerFunction<BloomFilterMightContainFunction, bool, Varbinary, int64_t>(

@@ -462,16 +462,16 @@ TEST_F(Re2FunctionsTest, likePattern) {
 
 TEST_F(Re2FunctionsTest, likeDeterminePatternKind) {
   auto testPattern =
-      [&](StringView pattern, PatternKind patternKind, vector_size_t length) {
+      [&](std::string_view pattern, PatternKind patternKind, size_t length) {
         PatternMetadata patternMetadata =
             determinePatternKind(pattern, std::nullopt);
         EXPECT_EQ(patternMetadata.patternKind, patternKind);
         EXPECT_EQ(patternMetadata.length, length);
       };
 
-  auto testPatternString = [&](StringView pattern,
+  auto testPatternString = [&](std::string_view pattern,
                                PatternKind patternKind,
-                               StringView fixedPattern) {
+                               std::string_view fixedPattern) {
     PatternMetadata patternMetadata =
         determinePatternKind(pattern, std::nullopt);
     EXPECT_EQ(patternMetadata.patternKind, patternKind);
@@ -526,9 +526,9 @@ TEST_F(Re2FunctionsTest, likeDeterminePatternKind) {
 }
 
 TEST_F(Re2FunctionsTest, likeDeterminePatternKindWithEscapeChar) {
-  auto testPattern = [&](StringView pattern,
+  auto testPattern = [&](std::string_view pattern,
                          PatternKind patternKind,
-                         StringView fixedPattern) {
+                         std::string_view fixedPattern) {
     PatternMetadata patternMetadata = determinePatternKind(pattern, '\\');
     EXPECT_EQ(patternMetadata.patternKind, patternKind);
     EXPECT_EQ(patternMetadata.length, fixedPattern.size());
@@ -589,6 +589,18 @@ TEST_F(Re2FunctionsTest, likePatternWildcard) {
   testLike("\nabcde\n", "bcd%", false);
   testLike("\nabcde\n", "%bcd", false);
   testLike("\nabcde\n", "%bcf%", false);
+}
+
+TEST_F(Re2FunctionsTest, likePatternEscapingEscapeChar) {
+  testLike(R"(\)", R"(\\)", '\\', true);
+  testLike(R"(\abc)", R"(\\%)", '\\', true);
+  testLike(R"(\abc)", R"(\\abc)", '\\', true);
+  testLike(R"(abc\abc)", R"(abc\\abc)", '\\', true);
+  testLike(R"(\abcdef)", R"(\\abc%)", '\\', true);
+  testLike(R"(\abcdefghijkl)", R"(\\abc%gh%)", '\\', true);
+  testLike(R"(abc\abc)", R"(%\\%)", '\\', true);
+  testLike(R"(abcdef\abcdef)", R"(%\\abc%)", '\\', true);
+  testLike(R"(abcdef\\\abcdef)", R"(%\\\\\\abc%)", '\\', true);
 }
 
 TEST_F(Re2FunctionsTest, likePatternFixed) {

@@ -148,15 +148,6 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
     /// memory pools from the same root memory pool independently.
     bool threadSafe{true};
 
-    /// TODO: deprecate this flag after all the existing memory leak use cases
-    /// have been fixed.
-    ///
-    /// If true, checks the memory usage leak on destruction.
-    ///
-    /// NOTE: user can turn on/off the memory leak check of each individual
-    /// memory pools from the same root memory pool independently.
-    bool checkUsageLeak{FLAGS_velox_memory_leak_check_enabled};
-
     /// If true, tracks the allocation and free call stacks to detect the source
     /// of memory leak for testing purpose.
     bool debugEnabled{FLAGS_velox_memory_pool_debug_enabled};
@@ -210,12 +201,6 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
   /// leaf memory pool with memory usage tracking enabled.
   virtual bool threadSafe() const {
     return threadSafe_;
-  }
-
-  /// Returns true if this memory pool checks memory leak on destruction.
-  /// Used only for test purposes.
-  virtual bool testingCheckUsageLeak() const {
-    return checkUsageLeak_;
   }
 
   /// Invoked to traverse the memory pool subtree rooted at this, and calls
@@ -531,7 +516,6 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
   const int64_t maxCapacity_;
   const bool trackUsage_;
   const bool threadSafe_;
-  const bool checkUsageLeak_;
   const bool debugEnabled_;
   const bool coreOnAllocationFailureEnabled_;
 
@@ -560,15 +544,23 @@ std::ostream& operator<<(std::ostream& os, const MemoryPool::Stats& stats);
 
 class MemoryPoolImpl : public MemoryPool {
  public:
+  /// The callback invoked on the root memory pool destruction. It is set by
+  /// memory manager to return back the allocated memory capacity.
   using DestructionCallback = std::function<void(MemoryPool*)>;
+  /// The callback invoked when the used memory reservation of the root memory
+  /// pool exceed its capacity. It is set by memory manager to grow the memory
+  /// pool capacity. The callback returns true if the capacity growth succeeds,
+  /// otherwise false.
+  using GrowCapacityCallback = std::function<bool(MemoryPool*, uint64_t)>;
 
   MemoryPoolImpl(
       MemoryManager* manager,
       const std::string& name,
       Kind kind,
       std::shared_ptr<MemoryPool> parent,
-      std::unique_ptr<MemoryReclaimer> reclaimer = nullptr,
-      DestructionCallback destructionCb = nullptr,
+      std::unique_ptr<MemoryReclaimer> reclaimer,
+      GrowCapacityCallback growCapacityCb,
+      DestructionCallback destructionCb,
       const Options& options = Options{});
 
   ~MemoryPoolImpl() override;
@@ -978,6 +970,7 @@ class MemoryPoolImpl : public MemoryPool {
 
   MemoryManager* const manager_;
   MemoryAllocator* const allocator_;
+  const GrowCapacityCallback growCapacityCb_;
   const DestructionCallback destructionCb_;
 
   // Regex for filtering on 'name_' when debug mode is enabled. This allows us

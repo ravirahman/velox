@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
 
 #include <folly/Executor.h>
@@ -125,6 +126,10 @@ class QueryCtx {
     pool_ = std::move(pool);
   }
 
+  /// Updates the aggregated spill bytes of this query, and and throws if
+  /// exceeds the max spill bytes limit.
+  void updateSpilledBytesAndCheckLimit(uint64_t bytes);
+
  private:
   static Config* getEmptyConfig() {
     static const std::unique_ptr<Config> kEmptyConfig =
@@ -134,7 +139,7 @@ class QueryCtx {
 
   void initPool(const std::string& queryId) {
     if (pool_ == nullptr) {
-      pool_ = memory::defaultMemoryManager().addRootPool(
+      pool_ = memory::deprecatedDefaultMemoryManager().addRootPool(
           QueryCtx::generatePoolName(queryId));
     }
   }
@@ -149,6 +154,7 @@ class QueryCtx {
   std::shared_ptr<memory::MemoryPool> pool_;
   folly::Executor::KeepAlive<> executorKeepalive_;
   QueryConfig queryConfig_;
+  std::atomic<uint64_t> numSpilledBytes_{0};
 };
 
 // Represents the state of one thread of query execution.

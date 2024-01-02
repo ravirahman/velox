@@ -59,6 +59,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
   explicit SpillTest()
       : statWriter_(std::make_unique<TestRuntimeStatWriter>(runtimeStats_)) {
     setThreadLocalRunTimeStatWriter(statWriter_.get());
+    updateSpilledBytesCb_ = [&](uint64_t) {};
   }
 
   ~SpillTest() {
@@ -66,8 +67,12 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
   }
 
  protected:
+  static void SetUpTestCase() {
+    memory::MemoryManager::testingSetInstance({});
+  }
+
   void SetUp() override {
-    allocator_ = memory::MemoryAllocator::getInstance();
+    allocator_ = memory::memoryManager()->allocator();
     tempDir_ = exec::test::TempDirectoryPath::create();
     if (!isRegisteredVectorSerde()) {
       facebook::velox::serializer::presto::PrestoVectorSerde::
@@ -153,6 +158,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
     stats_.wlock()->reset();
     state_ = std::make_unique<SpillState>(
         [&]() -> const std::string& { return tempDir_->path; },
+        updateSpilledBytesCb_,
         fileNamePrefix_,
         numPartitions,
         1,
@@ -412,6 +418,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
   std::unique_ptr<SpillState> state_;
   std::unordered_map<std::string, RuntimeMetric> runtimeStats_;
   std::unique_ptr<TestRuntimeStatWriter> statWriter_;
+  common::UpdateAndCheckSpillLimitCB updateSpilledBytesCb_;
 };
 
 TEST_P(SpillTest, spillState) {
@@ -450,6 +457,7 @@ TEST_P(SpillTest, spillTimestamp) {
 
   SpillState state(
       [&]() -> const std::string& { return tempDirectory->path; },
+      updateSpilledBytesCb_,
       "test",
       1,
       1,

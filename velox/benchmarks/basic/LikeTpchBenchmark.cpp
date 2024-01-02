@@ -173,7 +173,7 @@ class LikeFunctionsBenchmark : public FunctionBaseTest,
  private:
   static constexpr const char* kWildcardCharacterSet = "%_";
   static constexpr const char* kAnyWildcardCharacter = "%";
-  std::shared_ptr<MemoryPool> pool_{addDefaultLeafMemoryPool()};
+  std::shared_ptr<MemoryPool> pool_{memory::memoryManager()->addLeafPool()};
   VectorPtr inputFuzzer_;
 };
 
@@ -234,6 +234,7 @@ BENCHMARK(tpchQuery20) {
 
 int main(int argc, char* argv[]) {
   folly::init(&argc, &argv, true);
+  memory::MemoryManager::initialize({});
   benchmark = std::make_unique<LikeFunctionsBenchmark>();
   folly::runBenchmarks();
   benchmark.reset();

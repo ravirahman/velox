@@ -20,6 +20,13 @@
 namespace facebook::velox {
 
 void registerVeloxMetrics() {
+  /// ================== Task Execution Counters =================
+  // The number of driver yield count when exceeds the per-driver cpu time slice
+  // limit if enforced.
+  DEFINE_METRIC(kMetricDriverYieldCount, facebook::velox::StatType::COUNT);
+
+  /// ================== Cache Counters =================
+
   // Tracks hive handle generation latency in range of [0, 100s] and reports
   // P50, P90, P99, and P100.
   DEFINE_HISTOGRAM_METRIC(
@@ -31,10 +38,6 @@ void registerVeloxMetrics() {
   // reports P50, P90, P99, and P100.
   DEFINE_HISTOGRAM_METRIC(
       kMetricCacheShrinkTimeMs, 10, 0, 100'000, 50, 90, 99, 100);
-
-  // Tracks the number of times that we hit the max spill level limit.
-  DEFINE_METRIC(
-      kMetricMaxSpillLevelExceededCount, facebook::velox::StatType::COUNT);
 
   /// ================== Memory Arbitration Counters =================
 
@@ -95,9 +98,70 @@ void registerVeloxMetrics() {
   DEFINE_HISTOGRAM_METRIC(
       kMetricArbitratorArbitrationTimeMs, 20, 0, 600'000, 50, 90, 99, 100);
 
-  /// Tracks the average of free memory capacity managed by the arbitrator in
-  /// bytes.
+  // Tracks the average of free memory capacity managed by the arbitrator in
+  // bytes.
   DEFINE_METRIC(
       kMetricArbitratorFreeCapacityBytes, facebook::velox::StatType::AVG);
+
+  // Tracks the leaf memory pool usage leak in bytes.
+  DEFINE_METRIC(
+      kMetricMemoryPoolUsageLeakBytes, facebook::velox::StatType::SUM);
+
+  // Tracks the leaf memory pool reservation leak in bytes.
+  DEFINE_METRIC(
+      kMetricMemoryPoolReservationLeakBytes, facebook::velox::StatType::SUM);
+
+  /// ================== Spill related Counters =================
+
+  // The number of bytes in memory to spill.
+  DEFINE_METRIC(kMetricSpilledInputBytes, facebook::velox::StatType::SUM);
+
+  // The number of bytes spilled to disk which can be number of compressed
+  // bytes if compression is enabled.
+  DEFINE_METRIC(kMetricSpilledBytes, facebook::velox::StatType::SUM);
+
+  // The number of spilled rows.
+  DEFINE_METRIC(kMetricSpilledRowsCount, facebook::velox::StatType::COUNT);
+
+  // The number of spilled files.
+  DEFINE_METRIC(kMetricSpilledFilesCount, facebook::velox::StatType::COUNT);
+
+  // The distribution of the amount of time spent on filling rows for spilling.
+  // in range of [0, 600s] with 20 buckets. It is configured to report the
+  // latency at P50, P90, P99, and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricSpillFillTimeMs, 20, 0, 600'000, 50, 90, 99, 100);
+
+  // The distribution of the amount of time spent on sorting rows for spilling
+  // in range of [0, 600s] with 20 buckets. It is configured to report the
+  // latency at P50, P90, P99, and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricSpillSortTimeMs, 20, 0, 600'000, 50, 90, 99, 100);
+
+  // The distribution of the amount of time spent on serializing rows for
+  // spilling in range of [0, 600s] with 20 buckets. It is configured to report
+  // the latency at P50, P90, P99, and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricSpillSerializationTimeMs, 20, 0, 600'000, 50, 90, 99, 100);
+
+  // The number of disk writes to spill rows.
+  DEFINE_METRIC(kMetricSpillDiskWritesCount, facebook::velox::StatType::COUNT);
+
+  // The distribution of the amount of time spent on copy out serialized
+  // rows for disk write in range of [0, 600s] with 20 buckets. It is configured
+  // to report the latency at P50, P90, P99, and P100 percentiles. Note:  If
+  // compression is enabled, this includes the compression time.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricSpillFlushTimeMs, 20, 0, 600'000, 50, 90, 99, 100);
+
+  // The distribution of the amount of time spent on writing spilled rows to
+  // disk in range of [0, 600s] with 20 buckets. It is configured to report the
+  // latency at P50, P90, P99, and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricSpillWriteTimeMs, 20, 0, 600'000, 50, 90, 99, 100);
+
+  // Tracks the number of times that we hit the max spill level limit.
+  DEFINE_METRIC(
+      kMetricMaxSpillLevelExceededCount, facebook::velox::StatType::COUNT);
 }
 } // namespace facebook::velox

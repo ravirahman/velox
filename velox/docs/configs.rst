@@ -118,6 +118,11 @@ Generic Configuration
      - true
      - Whether to enable caches in expression evaluation. If set to true, optimizations including vector pools and
        evalWithMemo are enabled.
+   * - driver_cpu_time_slice_limit_ms
+     - integer
+     - 0
+     - If it is not zero, specifies the time limit that a driver can continuously
+       run on a thread before yield. If it is zero, then it no limit.
 
 .. _expression-evaluation-conf:
 
@@ -278,10 +283,26 @@ Spilling
        spilling which might use recursive spilling when the build table is very large. -1 means unlimited.
        In this case an extremely large query might run out of spilling partition bits. The max spill level
        can be used to prevent a query from using too much io and cpu resources.
+   * - max_spill_run_rows
+     - integer
+     - 12582912
+     - The max number of rows to fill and spill for each spill run. This is used to cap the memory used for spilling.
+       If it is zero, then there is no limit and spilling might run out of memory. Based on offline test results, the
+       default value is set to 12 million rows which uses ~128MB memory when to fill a spill run.
+       Relation between spill rows and memory usage are as follows:
+         * ``12 million rows: 128 MB``
+         * ``30 million rows: 256 MB``
+         * ``60 million rows: 512 MB``
    * - max_spill_file_size
      - integer
      - 0
      - The maximum allowed spill file size. Zero means unlimited.
+   * - max_spill_bytes
+     - integer
+     - 107374182400
+     - The max spill bytes limit set for each query. This is used to cap the storage used for spilling.
+       If it is zero, then there is no limit and spilling might exhaust the storage or takes too long to run.
+       The default value is set to 100 GB.
    * - spill_write_buffer_size
      - integer
      - 4MB
@@ -414,7 +435,7 @@ Each query can override the config by setting corresponding query session proper
    * - max-coalesced-bytes
      -
      - integer
-     - 512KB
+     - 512kB
      - Maximum size in bytes to coalesce requests to be fetched in a single request.
    * - max-coalesced-distance-bytes
      -

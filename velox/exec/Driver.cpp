@@ -349,6 +349,15 @@ RowVectorPtr Driver::next(std::shared_ptr<BlockingState>& blockingState) {
   return result;
 }
 
+std::shared_ptr<Driver> Driver::testingCreate(std::unique_ptr<DriverCtx> ctx) {
+  auto driver = new Driver();
+  if (ctx != nullptr) {
+    ctx->driver = driver;
+    driver->ctx_ = std::move(ctx);
+  }
+  return std::shared_ptr<Driver>(driver);
+}
+
 void Driver::enqueueInternal() {
   VELOX_CHECK(!state_.isEnqueued);
   state_.isEnqueued = true;

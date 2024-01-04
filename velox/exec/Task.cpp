@@ -653,7 +653,7 @@ void Task::start(uint32_t maxDrivers, uint32_t concurrentSplitGroups) {
     }
     initializePartitionOutput();
     createAndStartDrivers(concurrentSplitGroups);
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
     if (isRunning()) {
       setError(std::current_exception());
     } else {
@@ -1758,7 +1758,7 @@ ContinueFuture Task::terminate(TaskState terminalState) {
         VELOX_FAIL(
             state_ == TaskState::kCanceled ? "Cancelled"
                                            : "Aborted for external error");
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
         exception_ = std::current_exception();
       }
     }
@@ -2281,7 +2281,7 @@ void Task::setError(const std::string& message) {
   // std::current_exception().
   try {
     throw std::runtime_error(message);
-  } catch (const std::runtime_error&) {
+  } catch (const std::runtime_error& e) {
     setError(std::current_exception());
   }
 }

@@ -762,7 +762,7 @@ void castFromJson(
     } else {
       try {
         object = folly::parseJson(inputVector->valueAt(row));
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
         writer.commitNull();
         VELOX_USER_FAIL("Not a JSON input: {}", inputVector->valueAt(row));
       }

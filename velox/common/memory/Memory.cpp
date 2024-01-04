@@ -22,7 +22,8 @@ DECLARE_int32(velox_memory_num_shared_leaf_pools);
 
 namespace facebook::velox::memory {
 namespace {
-constexpr std::string_view kSysRootName{"__sys_root__"};
+static constexpr std::string_view kDefaultRootName{"__default_root__"};
+static constexpr std::string_view kDefaultLeafName("__default_leaf__");
 
 std::mutex& instanceMutex() {
   static std::mutex kMutex;
@@ -58,8 +59,7 @@ std::unique_ptr<MemoryArbitrator> createArbitrator(
            std::min(options.arbitratorCapacity, options.allocatorCapacity),
        .memoryPoolTransferCapacity = options.memoryPoolTransferCapacity,
        .memoryReclaimWaitMs = options.memoryReclaimWaitMs,
-       .arbitrationStateCheckCb = options.arbitrationStateCheckCb,
-       .checkUsageLeak = options.checkUsageLeak});
+       .arbitrationStateCheckCb = options.arbitrationStateCheckCb});
 }
 } // namespace
 
@@ -77,7 +77,7 @@ MemoryManager::MemoryManager(const MemoryManagerOptions& options)
       }),
       defaultRoot_{std::make_shared<MemoryPoolImpl>(
           this,
-          std::string(kSysRootName),
+          std::string(kDefaultRootName),
           MemoryPool::Kind::kAggregate,
           nullptr,
           nullptr,
@@ -92,7 +92,7 @@ MemoryManager::MemoryManager(const MemoryManagerOptions& options)
               .debugEnabled = options.debugEnabled,
               .coreOnAllocationFailureEnabled =
                   options.coreOnAllocationFailureEnabled})},
-      spillPool_{addLeafPool("__sys_spilling__")} {
+      spillPool_{addLeafPool("_sys.spilling")} {
   VELOX_CHECK_NOT_NULL(allocator_);
   VELOX_CHECK_NOT_NULL(arbitrator_);
   VELOX_USER_CHECK_GE(capacity(), 0);

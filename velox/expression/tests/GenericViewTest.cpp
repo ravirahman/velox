@@ -756,7 +756,7 @@ struct ArrayHasDuplicateFunc {
       }
 
       if (set.count(*item)) {
-        // Item already exists.
+        // Item already exisits.
         out = true;
         return true;
       }

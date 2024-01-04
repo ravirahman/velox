@@ -561,10 +561,10 @@ class HashJoinBuilder {
     runTest(planNode, false, maxSpillLevel_.value_or(-1));
     if (injectSpill_) {
       if (maxSpillLevel_.has_value()) {
-        runTest(planNode, true, maxSpillLevel_.value(), 100);
+        runTest(planNode, true, maxSpillLevel_.value());
       } else {
-        runTest(planNode, true, 0, 100);
-        runTest(planNode, true, 2, 100);
+        runTest(planNode, true, 0);
+        runTest(planNode, true, 2);
       }
     }
   }
@@ -572,8 +572,7 @@ class HashJoinBuilder {
   void runTest(
       const core::PlanNodePtr& planNode,
       bool injectSpill,
-      int32_t maxSpillLevel = -1,
-      uint32_t maxDriverYieldTimeMs = 0) {
+      int32_t maxSpillLevel = -1) {
     AssertQueryBuilder builder(planNode, duckDbQueryRunner_);
     builder.maxDrivers(numDrivers_);
     if (makeInputSplits_) {
@@ -612,11 +611,6 @@ class HashJoinBuilder {
     config(
         core::QueryConfig::kHashProbeFinishEarlyOnEmptyBuild,
         hashProbeFinishEarlyOnEmptyBuild_ ? "true" : "false");
-    if (maxDriverYieldTimeMs != 0) {
-      config(
-          core::QueryConfig::kDriverCpuTimeSliceLimitMs,
-          std::to_string(maxDriverYieldTimeMs));
-    }
 
     if (!configs_.empty()) {
       auto configCopy = configs_;

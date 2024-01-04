@@ -735,12 +735,6 @@ std::pair<std::string, std::string> HiveDataSink::getWriterFileNames(
   const std::string writeFileName = isCommitRequired()
       ? fmt::format(".tmp.velox.{}_{}", targetFileName, makeUuid())
       : targetFileName;
-  if (insertTableHandle_->tableStorageFormat() ==
-      dwio::common::FileFormat::PARQUET) {
-    return {
-        fmt::format("{}{}", targetFileName, ".parquet"),
-        fmt::format("{}{}", writeFileName, ".parquet")};
-  }
   return {targetFileName, writeFileName};
 }
 

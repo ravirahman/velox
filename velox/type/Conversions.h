@@ -394,13 +394,15 @@ struct Converter<TypeKind::VARBINARY, void, TRUNCATE, LEGACY_CAST> {
 template <bool TRUNCATE, bool LEGACY_CAST>
 struct Converter<TypeKind::VARCHAR, void, TRUNCATE, LEGACY_CAST> {
   template <typename T>
-  static std::string cast(const T& val) requires(std::is_same_v<T, uint128_t> || std::is_same_v<T, int128_t>) {
+  static typename std::enable_if_t< std::is_same_v<T, uint128_t> || std::is_same_v<T, int128_t>, std::string>
+  cast(const T& val) {
     return std::to_string(val);
   }
 
 
   template <typename T>
-  static std::string cast(const T& val) requires(!std::is_same_v<T, uint128_t> && !std::is_same_v<T, int128_t>) {
+  static typename std::enable_if_t< ! std::is_same_v<T, uint128_t> && ! std::is_same_v<T, int128_t>, std::string>
+  cast(const T& val) {
     if constexpr (std::is_same_v<T, double> || std::is_same_v<T, float>) {
       if constexpr (LEGACY_CAST) {
         auto str = folly::to<std::string>(val);

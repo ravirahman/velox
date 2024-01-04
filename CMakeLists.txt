@@ -283,7 +283,7 @@ endif()
 # Required so velox code can be used in a dynamic library
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 execute_process(

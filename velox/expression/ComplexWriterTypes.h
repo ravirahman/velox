@@ -306,8 +306,8 @@ class ArrayWriter {
 
  private:
   // Make sure user do not use those.
-  ArrayWriter<V>() = default;
-  ArrayWriter<V>(const ArrayWriter<V>&) = default;
+  ArrayWriter() = default;
+  ArrayWriter(const ArrayWriter<V>&) = default;
   ArrayWriter<V>& operator=(const ArrayWriter<V>&) = default;
 
   void commitMostRecentChildItem() {
@@ -501,9 +501,9 @@ class MapWriter {
 
  private:
   // Make sure user do not use those.
-  MapWriter<K, V>() = default;
+  MapWriter() = default;
 
-  MapWriter<K, V>(const MapWriter<K, V>&) = default;
+  MapWriter(const MapWriter<K, V>&) = default;
 
   MapWriter<K, V>& operator=(const MapWriter<K, V>&) = default;
 

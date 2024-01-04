@@ -679,8 +679,10 @@ uint64_t variant::hash() const {
   switch (kind_) {
     case TypeKind::BIGINT:
       return folly::Hash{}(value<TypeKind::BIGINT>());
+    #ifdef FOLLY_HAVE_INT128_T
     case TypeKind::HUGEINT:
       return folly::Hash{}(value<TypeKind::HUGEINT>());
+    #endif
     case TypeKind::INTEGER:
       return folly::Hash{}(value<TypeKind::INTEGER>());
     case TypeKind::SMALLINT:

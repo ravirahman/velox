@@ -60,7 +60,7 @@ class AsyncSource {
     try {
       CpuWallTimer timer(timing_);
       item = make();
-    } catch (std::exception&) {
+    } catch (std::exception& e) {
       std::lock_guard<std::mutex> l(mutex_);
       exception_ = std::current_exception();
     }
@@ -115,7 +115,7 @@ class AsyncSource {
     if (make) {
       try {
         return make();
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
         std::lock_guard<std::mutex> l(mutex_);
         exception_ = std::current_exception();
         throw;

@@ -25,7 +25,7 @@ namespace velox {
 std::exception_ptr toVeloxException(const std::exception_ptr& exceptionPtr) {
   try {
     std::rethrow_exception(exceptionPtr);
-  } catch (const VeloxException&) {
+  } catch (const VeloxException& e) {
     return exceptionPtr;
   } catch (const std::exception& e) {
     return std::make_exception_ptr(

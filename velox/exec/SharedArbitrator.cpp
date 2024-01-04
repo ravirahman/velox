@@ -148,19 +148,7 @@ SharedArbitrator::findCandidateWithLargestCapacity(
 }
 
 SharedArbitrator::~SharedArbitrator() {
-  if (freeCapacity_ != capacity_) {
-    const std::string errMsg = fmt::format(
-        "\"There is unexpected free capacity not given back to arbitrator "
-        "on destruction: freeCapacity_ != capacity_ ({} vs {})\\n{}\"",
-        freeCapacity_,
-        capacity_,
-        toString());
-    if (checkUsageLeak_) {
-      VELOX_FAIL(errMsg);
-    } else {
-      LOG(ERROR) << errMsg;
-    }
-  }
+  VELOX_CHECK_EQ(freeCapacity_, capacity_, "{}", toString());
 }
 
 uint64_t SharedArbitrator::growCapacity(
@@ -312,7 +300,7 @@ bool SharedArbitrator::handleOOM(
       VELOX_MEM_POOL_ABORTED(
           memoryPoolAbortMessage(victim, requestor, targetBytes));
     }
-  } catch (VeloxRuntimeError&) {
+  } catch (VeloxRuntimeError& e) {
     abort(victim, std::current_exception());
   }
   // Free up all the unused capacity from the aborted memory pool and gives back
@@ -548,11 +536,9 @@ std::string SharedArbitrator::toString() const {
 
 std::string SharedArbitrator::toStringLocked() const {
   return fmt::format(
-      "ARBITRATOR[{} CAPACITY[{}] RUNNING[{}] QUEUING[{}] {}]",
+      "ARBITRATOR[{} CAPACITY[{}] {}]",
       kind_,
       succinctBytes(capacity_),
-      running_ ? "true" : "false",
-      waitPromises_.size(),
       statsLocked().toString());
 }
 

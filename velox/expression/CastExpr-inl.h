@@ -165,7 +165,7 @@ void CastExpr::applyToSelectedNoThrowLocal(
         }
         // Avoid double throwing.
         context.setVeloxExceptionError(row, std::current_exception());
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
         context.setError(row, std::current_exception());
       }
     });

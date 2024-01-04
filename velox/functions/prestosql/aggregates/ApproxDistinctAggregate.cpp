@@ -114,12 +114,6 @@ inline uint64_t hashOne(T value) {
   return XXH64(&value, sizeof(T), 0);
 }
 
-// Use timestamp.toMillis() to compute hash value.
-template <>
-inline uint64_t hashOne<Timestamp>(Timestamp value) {
-  return hashOne(value.toMillis());
-}
-
 template <>
 inline uint64_t hashOne<StringView>(StringView value) {
   return XXH64(value.data(), value.size(), 0);

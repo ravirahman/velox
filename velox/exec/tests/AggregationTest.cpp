@@ -25,14 +25,13 @@
 #include "velox/exec/Aggregate.h"
 #include "velox/exec/GroupingSet.h"
 #include "velox/exec/PlanNodeStats.h"
-#include "velox/exec/RowContainer.h"
 #include "velox/exec/Values.h"
+#include "velox/exec/tests/utils/ArbitratorTestUtil.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/OperatorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/SumNonPODAggregate.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/vector/fuzzer/VectorFuzzer.h"
 
 namespace facebook::velox::exec::test {
 
@@ -397,6 +396,12 @@ class AggregationTest : public OperatorTestBase {
            VARCHAR()})};
   folly::Random::DefaultGenerator rng_;
   memory::MemoryReclaimer::Stats reclaimerStats_;
+  VectorFuzzer::Options fuzzerOpts_{
+      .vectorSize = 1024,
+      .nullRatio = 0,
+      .stringLength = 1024,
+      .stringVariableLength = false,
+      .allowLazyVector = false};
 };
 
 template <>

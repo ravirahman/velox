@@ -33,6 +33,21 @@ namespace facebook::velox::exec {
 template <typename T>
 struct VectorReader;
 
+template <TypeKind kind>
+struct KindToSimpleType {
+  using type = typename TypeTraits<kind>::NativeType;
+};
+
+template <>
+struct KindToSimpleType<TypeKind::VARCHAR> {
+  using type = Varchar;
+};
+
+template <>
+struct KindToSimpleType<TypeKind::VARBINARY> {
+  using type = Varbinary;
+};
+
 // Pointer wrapper used to convert r-values to valid return type for operator->.
 template <typename T>
 class PointerWrapper {

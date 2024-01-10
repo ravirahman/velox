@@ -95,4 +95,61 @@ TEST_F(PrestoQueryRunnerTest, DISABLED_fuzzer) {
   velox::exec::test::assertEqualResults(
       prestoResults, plan->outputType(), {veloxResults});
 }
+
+TEST_F(PrestoQueryRunnerTest, sortedAggregation) {
+  auto queryRunner =
+      std::make_unique<PrestoQueryRunner>("http://unused", "hive");
+
+  auto data = makeRowVector({
+      makeFlatVector<int64_t>({1, 2, 1, 2, 1}),
+      makeFlatVector<int64_t>({2, 3, 4, 1, 4}),
+      makeFlatVector<int64_t>({5, 6, 7, 8, 3}),
+  });
+
+  auto plan =
+      velox::exec::test::PlanBuilder()
+          .values({data})
+          .singleAggregation({}, {"multimap_agg(c0, c1 order by c0 asc)"})
+          .planNode();
+
+  auto sql = queryRunner->toSql(plan);
+  ASSERT_TRUE(sql.has_value());
+
+  ASSERT_EQ(
+      "SELECT multimap_agg(c0, c1 ORDER BY c0 ASC NULLS LAST) as a0 FROM tmp",
+      sql.value());
+
+  // Plans with multiple order by's in the aggregate.
+
+  plan =
+      velox::exec::test::PlanBuilder()
+          .values({data})
+          .singleAggregation(
+              {},
+              {"multimap_agg(c0, c1 order by c1 asc nulls first, c0 desc nulls last, c2 asc nulls last)"})
+          .planNode();
+
+  sql = queryRunner->toSql(plan);
+  ASSERT_TRUE(sql.has_value());
+  ASSERT_EQ(
+      "SELECT multimap_agg(c0, c1 ORDER BY c1 ASC NULLS FIRST, c0 DESC NULLS LAST, c2 ASC NULLS LAST) as a0 FROM tmp",
+      sql.value());
+}
+
+TEST_F(PrestoQueryRunnerTest, distinctAggregation) {
+  auto queryRunner =
+      std::make_unique<PrestoQueryRunner>("http://unused", "hive");
+
+  auto data =
+      makeRowVector({makeFlatVector<int64_t>({}), makeFlatVector<int64_t>({})});
+
+  auto plan = velox::exec::test::PlanBuilder()
+                  .values({data})
+                  .singleAggregation({}, {"array_agg(distinct c0)"})
+                  .planNode();
+
+  auto sql = queryRunner->toSql(plan);
+  ASSERT_TRUE(sql.has_value());
+  ASSERT_EQ("SELECT array_agg(distinct c0) as a0 FROM tmp", sql.value());
+}
 } // namespace facebook::velox::exec::test

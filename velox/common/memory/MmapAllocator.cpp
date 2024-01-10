@@ -532,8 +532,7 @@ void* MmapAllocator::allocateBytesWithoutRetry(
   }
 
   ContiguousAllocation allocation;
-  auto numPages = bits::roundUp(bytes, AllocationTraits::kPageSize) /
-      AllocationTraits::kPageSize;
+  auto numPages = AllocationTraits::numPages(bytes);
   if (!allocateContiguousWithoutRetry(numPages, nullptr, allocation)) {
     return nullptr;
   }
@@ -1029,8 +1028,13 @@ bool MmapAllocator::useMalloc(uint64_t bytes) {
 
 std::string MmapAllocator::toString() const {
   std::stringstream out;
-  out << "Memory Allocator[" << kindString(kind_) << " capacity "
-      << ((capacity_ == kMaxMemory) ? "UNLIMITED" : succinctBytes(capacity_))
+  out << "Memory Allocator[" << kindString(kind_) << " total capacity "
+      << ((capacity_ == kMaxMemory) ? "UNLIMITED" : succinctBytes(capacity()))
+      << " free capacity "
+      << ((capacity_ == kMaxMemory)
+              ? "UNLIMITED"
+              : succinctBytes(
+                    capacity() - AllocationTraits::pageBytes(numAllocated())))
       << " allocated pages " << numAllocated_ << " mapped pages " << numMapped_
       << " external mapped pages " << numExternalMapped_ << std::endl;
   for (auto& sizeClass : sizeClasses_) {

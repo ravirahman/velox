@@ -375,21 +375,20 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
   virtual MemoryReclaimer* reclaimer() const = 0;
 
   /// Invoked by the memory arbitrator to enter memory arbitration processing.
-  /// It is a noop if 'reclaimer_' is not set, otherwise invoke the reclaimer's
+  /// It is a noop if 'reclaimer' is not set, otherwise invoke the reclaimer's
   /// corresponding method.
   virtual void enterArbitration() = 0;
 
   /// Invoked by the memory arbitrator to leave memory arbitration processing.
-  /// It is a noop if 'reclaimer_' is not set, otherwise invoke the reclaimer's
+  /// It is a noop if 'reclaimer' is not set, otherwise invoke the reclaimer's
   /// corresponding method.
   virtual void leaveArbitration() noexcept = 0;
 
-  /// Returns how many bytes is reclaimable from this memory pool. The function
-  /// returns true if this memory pool is reclaimable, and returns the estimated
-  /// reclaimable bytes in 'reclaimableBytes'. If 'reclaimer_' is not set, the
-  /// function returns false, otherwise invoke the reclaimer's corresponding
-  /// method.
-  virtual bool reclaimableBytes(uint64_t& reclaimableBytes) const = 0;
+  /// Function estimates the number of reclaimable bytes and returns in
+  /// 'reclaimableBytes'. If the 'reclaimer' is not set, the function returns
+  /// std::nullopt. Otherwise, it will invoke the corresponding method of the
+  /// reclaimer.
+  virtual std::optional<uint64_t> reclaimableBytes() const = 0;
 
   /// Invoked by the memory arbitrator to reclaim memory from this memory pool
   /// with specified reclaim target bytes. If 'targetBytes' is zero, then it
@@ -631,7 +630,7 @@ class MemoryPoolImpl : public MemoryPool {
 
   void leaveArbitration() noexcept override;
 
-  bool reclaimableBytes(uint64_t& reclaimableBytes) const override;
+  std::optional<uint64_t> reclaimableBytes() const override;
 
   uint64_t reclaim(
       uint64_t targetBytes,
@@ -832,7 +831,6 @@ class MemoryPoolImpl : public MemoryPool {
   // Tries to increment the reservation 'size' if it is within the limit and
   // returns true, otherwise the function returns false.
   bool maybeIncrementReservation(uint64_t size);
-  bool maybeIncrementReservationLocked(uint64_t size);
 
   // Release memory reservation for an allocation free or memory release with
   // specified 'size'. If 'releaseOnly' is true, then we only release the unused

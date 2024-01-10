@@ -673,12 +673,20 @@ class ArrayView {
         "efficient to use the standard iterator interface.");
   }
 
-  const BaseVector* elementsVector() const {
+  const BaseVector* elementsVectorBase() const {
     return reader_->baseVector();
+  }
+
+  bool isFlatElements() const {
+    return reader_->decoded_.isIdentityMapping();
   }
 
   vector_size_t offset() const {
     return offset_;
+  }
+
+  TypeKind elementKind() const {
+    return elementsVectorBase()->typeKind();
   }
 
  private:
@@ -1119,11 +1127,19 @@ class GenericView {
             "castTo type is not compatible with type of vector, vector type is {}",
             type()->toString()));
 
-    // TODO: We can distinguish if this is a null-free or not null-free
-    // generic. And based on that determine if we want to call operator[] or
-    // readNullFree. For now we always return nullable.
-    return ensureReader<ToType>()->operator[](
-        index_); // We pass the non-decoded index.
+    // If its a primitive type, then the casted reader always exists at
+    // castReaders_[0], and is set in Vector readers.
+    if constexpr (SimpleTypeTrait<ToType>::isPrimitiveType) {
+      return reinterpret_cast<VectorReader<ToType>*>(castReaders_[0].get())
+          ->
+          operator[](index_);
+    } else {
+      // TODO: We can distinguish if this is a null-free or not null-free
+      // generic. And based on that determine if we want to call operator[] or
+      // readNullFree. For now we always return nullable.
+      return ensureReader<ToType>()->operator[](
+          index_); // We pass the non-decoded index.
+    }
   }
 
   template <typename ToType>

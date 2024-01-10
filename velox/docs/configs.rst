@@ -118,6 +118,12 @@ Generic Configuration
      - true
      - Whether to enable caches in expression evaluation. If set to true, optimizations including vector pools and
        evalWithMemo are enabled.
+   * - max_shared_subexpr_results_cached
+     - integer
+     - 10
+     - For a given shared subexpression, the maximum distinct sets of inputs we cache results for. Lambdas can call
+       the same expression with different inputs many times, causing the results we cache to explode in size. Putting
+       a limit contains the memory usage.
    * - driver_cpu_time_slice_limit_ms
      - integer
      - 0
@@ -435,13 +441,18 @@ Each query can override the config by setting corresponding query session proper
    * - max-coalesced-bytes
      -
      - integer
-     - 512kB
+     - 128MB
      - Maximum size in bytes to coalesce requests to be fetched in a single request.
    * - max-coalesced-distance-bytes
      -
      - integer
-     - 128MB
+     - 512KB
      - Maximum distance in bytes between chunks to be fetched that may be coalesced into a single request.
+   * - load-quantum
+     -
+     - integer
+     - 8MB
+     - Define the size of each coalesce load request. E.g. in Parquet scan, if it's bigger than rowgroup size then the whole row group can be fetched together. Otherwise, the row group will be fetched column chunk by column chunk
    * - num-cached-file-handles
      -
      - integer
@@ -464,6 +475,18 @@ Each query can override the config by setting corresponding query session proper
      - string
      - 10MB
      - Maximum bytes for sort writer in one batch of output. This is to limit the memory usage of sort writer.
+   * - file-preload-threshold
+     -
+     - integer
+     - 8MB
+     - Usually Velox fetches the meta data firstly then fetch the rest of file. But if the file is very small, Velox can fetch the whole file directly to avoid multiple IO requests. 
+       The parameter controls the threshold when whole file is fetched. 
+   * - footer-estimated-size
+     -
+     - integer
+     - 1MB
+     - Define the estimation of footer size in ORC and Parquet format. The footer data includes version, schema, and meta data for every columns which may or may not need to be fetched later. 
+       The parameter controls the size when footer is fetched each time. Bigger value can decrease the IO requests but may fetch more useless meta data.
    * - hive.orc.writer.stripe-max-size
      - orc_optimized_writer_max_stripe_size
      - string

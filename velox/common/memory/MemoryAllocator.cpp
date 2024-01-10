@@ -98,14 +98,6 @@ MemoryAllocator::SizeMix MemoryAllocator::allocationSize(
       ++numUnits;
       needed -= size;
     }
-    if (FOLLY_UNLIKELY(numUnits * size > Allocation::PageRun::kMaxPagesInRun)) {
-      VELOX_MEM_ALLOC_ERROR(fmt::format(
-          "Too many pages {} to allocate, the number of units {} at size class of {} exceeds the PageRun limit {}",
-          numPages,
-          numUnits,
-          size,
-          Allocation::PageRun::kMaxPagesInRun));
-    }
     mix.sizeCounts[mix.numSizes] = numUnits;
     pagesToAlloc += numUnits * size;
     mix.sizeIndices[mix.numSizes++] = sizeIndex;
@@ -142,8 +134,7 @@ void MemoryAllocator::alignmentCheck(
 MachinePageCount MemoryAllocator::roundUpToSizeClassSize(
     size_t bytes,
     const std::vector<MachinePageCount>& sizes) {
-  auto pages = bits::roundUp(bytes, AllocationTraits::kPageSize) /
-      AllocationTraits::kPageSize;
+  auto pages = AllocationTraits::numPages(bytes);
   VELOX_CHECK_LE(pages, sizes.back());
   return *std::lower_bound(sizes.begin(), sizes.end(), pages);
 }

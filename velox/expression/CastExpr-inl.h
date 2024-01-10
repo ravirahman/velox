@@ -99,8 +99,10 @@ StringView convertToStringView(
       std::memset(writePosition, '0', numLeadingZeros);
       writePosition += numLeadingZeros;
       // Append remaining fraction digits.
-      auto [position, errorCode] = std::to_chars(
+      auto result = std::to_chars(
           writePosition, writePosition + maxVarcharSize, fraction);
+      position = result.ptr;
+      errorCode = result.ec;
       VELOX_DCHECK_EQ(
           errorCode,
           std::errc(),
@@ -165,7 +167,7 @@ void CastExpr::applyToSelectedNoThrowLocal(
         }
         // Avoid double throwing.
         context.setVeloxExceptionError(row, std::current_exception());
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         context.setError(row, std::current_exception());
       }
     });

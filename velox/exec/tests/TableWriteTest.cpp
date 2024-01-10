@@ -766,14 +766,28 @@ class TableWriteTest : public HiveConnectorTestBase {
       const std::string& targetDir) {
     verifyPartitionedDirPath(filePath, targetDir);
     if (commitStrategy_ == CommitStrategy::kNoCommit) {
-      ASSERT_TRUE(RE2::FullMatch(
-          filePath.filename().string(), "0[0-9]+_0_TaskCursorQuery_[0-9]+"))
-          << filePath.filename().string();
+      if (fileFormat_ == FileFormat::PARQUET) {
+        ASSERT_TRUE(RE2::FullMatch(
+            filePath.filename().string(),
+            "0[0-9]+_0_TaskCursorQuery_[0-9]+\\.parquet$"))
+            << filePath.filename().string();
+      } else {
+        ASSERT_TRUE(RE2::FullMatch(
+            filePath.filename().string(), "0[0-9]+_0_TaskCursorQuery_[0-9]+"))
+            << filePath.filename().string();
+      }
     } else {
-      ASSERT_TRUE(RE2::FullMatch(
-          filePath.filename().string(),
-          ".tmp.velox.0[0-9]+_0_TaskCursorQuery_[0-9]+_.+"))
-          << filePath.filename().string();
+      if (fileFormat_ == FileFormat::PARQUET) {
+        ASSERT_TRUE(RE2::FullMatch(
+            filePath.filename().string(),
+            ".tmp.velox.0[0-9]+_0_TaskCursorQuery_[0-9]+_.+\\.parquet$"))
+            << filePath.filename().string();
+      } else {
+        ASSERT_TRUE(RE2::FullMatch(
+            filePath.filename().string(),
+            ".tmp.velox.0[0-9]+_0_TaskCursorQuery_[0-9]+_.+"))
+            << filePath.filename().string();
+      }
     }
   }
 
@@ -2449,7 +2463,15 @@ TEST_P(AllTableWriterTest, tableWriteOutputCheck) {
       if (commitStrategy_ == CommitStrategy::kNoCommit) {
         ASSERT_EQ(writeFileName, targetFileName);
       } else {
-        ASSERT_TRUE(writeFileName.find(targetFileName) != std::string::npos);
+        const std::string kParquetSuffix = ".parquet";
+        if (folly::StringPiece(targetFileName).endsWith(kParquetSuffix)) {
+          // Remove the .parquet suffix.
+          auto trimmedFilename = targetFileName.substr(
+              0, targetFileName.size() - kParquetSuffix.size());
+          ASSERT_TRUE(writeFileName.find(trimmedFilename) != std::string::npos);
+        } else {
+          ASSERT_TRUE(writeFileName.find(targetFileName) != std::string::npos);
+        }
       }
     }
     if (!commitContextVector->isNullAt(i)) {
@@ -2950,17 +2972,18 @@ TEST_P(AllTableWriterTest, tableWriterStats) {
   const int32_t ORC_HEADER_LEN{3};
   const auto fixedWrittenBytes =
       numWrittenFiles * (fileFormat_ == FileFormat::DWRF ? ORC_HEADER_LEN : 0);
-  for (int i = 0; i < task->taskStats().pipelineStats.size(); ++i) {
-    auto operatorStats = task->taskStats().pipelineStats.at(i).operatorStats;
-    for (int j = 0; j < operatorStats.size(); ++j) {
-      if (operatorStats.at(j).operatorType == "TableWrite") {
-        ASSERT_GT(operatorStats.at(j).physicalWrittenBytes, fixedWrittenBytes);
-        ASSERT_EQ(
-            operatorStats.at(j).runtimeStats.at("numWrittenFiles").sum,
-            numWrittenFiles);
-      }
-    }
-  }
+
+  auto planStats = exec::toPlanStats(task->taskStats());
+  auto& stats = planStats.at(tableWriteNodeId_);
+  ASSERT_GT(stats.physicalWrittenBytes, fixedWrittenBytes);
+  ASSERT_GT(
+      stats.operatorStats.at("TableWrite")->physicalWrittenBytes,
+      fixedWrittenBytes);
+  ASSERT_EQ(
+      stats.operatorStats.at("TableWrite")
+          ->customStats.at("numWrittenFiles")
+          .sum,
+      numWrittenFiles);
 }
 
 DEBUG_ONLY_TEST_P(

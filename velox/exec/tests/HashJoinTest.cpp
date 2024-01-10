@@ -561,10 +561,10 @@ class HashJoinBuilder {
     runTest(planNode, false, maxSpillLevel_.value_or(-1));
     if (injectSpill_) {
       if (maxSpillLevel_.has_value()) {
-        runTest(planNode, true, maxSpillLevel_.value());
+        runTest(planNode, true, maxSpillLevel_.value(), 100);
       } else {
-        runTest(planNode, true, 0);
-        runTest(planNode, true, 2);
+        runTest(planNode, true, 0, 100);
+        runTest(planNode, true, 2, 100);
       }
     }
   }
@@ -572,7 +572,8 @@ class HashJoinBuilder {
   void runTest(
       const core::PlanNodePtr& planNode,
       bool injectSpill,
-      int32_t maxSpillLevel = -1) {
+      int32_t maxSpillLevel = -1,
+      uint32_t maxDriverYieldTimeMs = 0) {
     AssertQueryBuilder builder(planNode, duckDbQueryRunner_);
     builder.maxDrivers(numDrivers_);
     if (makeInputSplits_) {
@@ -611,6 +612,11 @@ class HashJoinBuilder {
     config(
         core::QueryConfig::kHashProbeFinishEarlyOnEmptyBuild,
         hashProbeFinishEarlyOnEmptyBuild_ ? "true" : "false");
+    if (maxDriverYieldTimeMs != 0) {
+      config(
+          core::QueryConfig::kDriverCpuTimeSliceLimitMs,
+          std::to_string(maxDriverYieldTimeMs));
+    }
 
     if (!configs_.empty()) {
       auto configCopy = configs_;
@@ -3132,6 +3138,62 @@ TEST_P(MultiThreadedHashJoinTest, noSpillLevelLimit) {
         }
         ASSERT_EQ(maxHashBuildSpillLevel(*task), 4);
       })
+      .run();
+}
+
+// Verify that dynamic filter pushed down from null-aware right semi project
+// join into table scan doesn't filter out nulls.
+TEST_F(HashJoinTest, nullAwareRightSemiProjectOverScan) {
+  auto probe = makeRowVector(
+      {"t0"},
+      {
+          makeNullableFlatVector<int32_t>({1, std::nullopt, 2}),
+      });
+
+  auto build = makeRowVector(
+      {"u0"},
+      {
+          makeNullableFlatVector<int32_t>({1, 2, 3, std::nullopt}),
+      });
+
+  std::shared_ptr<TempFilePath> probeFile = TempFilePath::create();
+  writeToFile(probeFile->path, {probe});
+
+  std::shared_ptr<TempFilePath> buildFile = TempFilePath::create();
+  writeToFile(buildFile->path, {build});
+
+  createDuckDbTable("t", {probe});
+  createDuckDbTable("u", {build});
+
+  core::PlanNodeId probeScanId;
+  core::PlanNodeId buildScanId;
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .tableScan(asRowType(probe->type()))
+                  .capturePlanNodeId(probeScanId)
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .tableScan(asRowType(build->type()))
+                          .capturePlanNodeId(buildScanId)
+                          .planNode(),
+                      "",
+                      {"u0", "match"},
+                      core::JoinType::kRightSemiProject,
+                      true /*nullAware*/)
+                  .planNode();
+
+  SplitInput splitInput = {
+      {probeScanId, {exec::Split(makeHiveConnectorSplit(probeFile->path))}},
+      {buildScanId, {exec::Split(makeHiveConnectorSplit(buildFile->path))}},
+  };
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .planNode(plan)
+      .inputSplits(splitInput)
+      .checkSpillStats(false)
+      .referenceQuery("SELECT u0, u0 IN (SELECT t0 FROM t) FROM u")
       .run();
 }
 

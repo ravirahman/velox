@@ -686,7 +686,7 @@ bool MemoryPoolImpl::maybeReserve(uint64_t increment) {
   const auto reservationToAdd = bits::roundUp(increment, kGrowthQuantum);
   try {
     reserve(reservationToAdd, true);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     if (aborted()) {
       // NOTE: we shall throw to stop the query execution if the root memory
       // pool has been aborted. It is also unsafe to proceed as the memory abort
@@ -737,7 +737,7 @@ void MemoryPoolImpl::reserveThreadSafe(uint64_t size, bool reserveOnly) {
         "facebook::velox::memory::MemoryPoolImpl::reserveThreadSafe", this);
     try {
       incrementReservationThreadSafe(this, increment);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
       // When race with concurrent memory reservation free, we might end up with
       // unused reservation but no used reservation if a retry memory
       // reservation attempt run into memory capacity exceeded error.
@@ -771,12 +771,10 @@ bool MemoryPoolImpl::incrementReservationThreadSafe(
     }
   }
 
-  {
-    std::lock_guard<std::mutex> l(mutex_);
-    if (maybeIncrementReservationLocked(size)) {
-      return true;
-    }
+  if (maybeIncrementReservation(size)) {
+    return true;
   }
+
   VELOX_CHECK_NULL(parent_);
 
   if (growCapacityCb_(requestor, size)) {
@@ -807,10 +805,6 @@ bool MemoryPoolImpl::incrementReservationThreadSafe(
 
 bool MemoryPoolImpl::maybeIncrementReservation(uint64_t size) {
   std::lock_guard<std::mutex> l(mutex_);
-  return maybeIncrementReservationLocked(size);
-}
-
-bool MemoryPoolImpl::maybeIncrementReservationLocked(uint64_t size) {
   if (isRoot()) {
     checkIfAborted();
 
@@ -957,12 +951,17 @@ MemoryReclaimer* MemoryPoolImpl::reclaimer() const {
   return reclaimer_.get();
 }
 
-bool MemoryPoolImpl::reclaimableBytes(uint64_t& reclaimableBytes) const {
-  reclaimableBytes = 0;
+std::optional<uint64_t> MemoryPoolImpl::reclaimableBytes() const {
   if (reclaimer() == nullptr) {
-    return false;
+    return std::nullopt;
   }
-  return reclaimer()->reclaimableBytes(*this, reclaimableBytes);
+
+  uint64_t reclaimableBytes = 0;
+  if (!reclaimer()->reclaimableBytes(*this, reclaimableBytes)) {
+    return std::nullopt;
+  }
+
+  return reclaimableBytes;
 }
 
 uint64_t MemoryPoolImpl::reclaim(

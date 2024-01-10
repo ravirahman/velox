@@ -148,7 +148,19 @@ SharedArbitrator::findCandidateWithLargestCapacity(
 }
 
 SharedArbitrator::~SharedArbitrator() {
-  VELOX_CHECK_EQ(freeCapacity_, capacity_, "{}", toString());
+  if (freeCapacity_ != capacity_) {
+    const std::string errMsg = fmt::format(
+        "\"There is unexpected free capacity not given back to arbitrator "
+        "on destruction: freeCapacity_ != capacity_ ({} vs {})\\n{}\"",
+        freeCapacity_,
+        capacity_,
+        toString());
+    if (checkUsageLeak_) {
+      VELOX_FAIL(errMsg);
+    } else {
+      LOG(ERROR) << errMsg;
+    }
+  }
 }
 
 uint64_t SharedArbitrator::growCapacity(
@@ -186,10 +198,13 @@ std::vector<SharedArbitrator::Candidate> SharedArbitrator::getCandidateStats(
   std::vector<SharedArbitrator::Candidate> candidates;
   candidates.reserve(pools.size());
   for (const auto& pool : pools) {
-    uint64_t reclaimableBytes;
-    const bool reclaimable = pool->reclaimableBytes(reclaimableBytes);
+    auto reclaimableBytesOpt = pool->reclaimableBytes();
+    const uint64_t reclaimableBytes = reclaimableBytesOpt.value_or(0);
     candidates.push_back(
-        {reclaimable, reclaimableBytes, pool->freeBytes(), pool.get()});
+        {reclaimableBytesOpt.has_value(),
+         reclaimableBytes,
+         pool->freeBytes(),
+         pool.get()});
   }
   return candidates;
 }
@@ -300,7 +315,7 @@ bool SharedArbitrator::handleOOM(
       VELOX_MEM_POOL_ABORTED(
           memoryPoolAbortMessage(victim, requestor, targetBytes));
     }
-  } catch (VeloxRuntimeError& e) {
+  } catch (VeloxRuntimeError&) {
     abort(victim, std::current_exception());
   }
   // Free up all the unused capacity from the aborted memory pool and gives back
@@ -536,9 +551,11 @@ std::string SharedArbitrator::toString() const {
 
 std::string SharedArbitrator::toStringLocked() const {
   return fmt::format(
-      "ARBITRATOR[{} CAPACITY[{}] {}]",
+      "ARBITRATOR[{} CAPACITY[{}] RUNNING[{}] QUEUING[{}] {}]",
       kind_,
       succinctBytes(capacity_),
+      running_ ? "true" : "false",
+      waitPromises_.size(),
       statsLocked().toString());
 }
 

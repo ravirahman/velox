@@ -274,7 +274,7 @@ void Driver::init(
 }
 
 std::shared_ptr<Driver> Driver::testingCreate(
-    std::unique_ptr<DriverCtx> ctx = nullptr) {
+    std::unique_ptr<DriverCtx> ctx) {
   auto driver = new Driver();
   if (ctx != nullptr) {
     ctx->driver = driver;

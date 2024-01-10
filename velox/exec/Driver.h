@@ -416,6 +416,8 @@ class Driver : public std::enable_shared_from_this<Driver> {
   /// Returns the process-wide number of driver cpu yields.
   static std::atomic_uint64_t& yieldCount();
 
+  static std::shared_ptr<Driver> testingCreate(std::unique_ptr<DriverCtx> ctx = nullptr);
+
  private:
   Driver() = default;
 

@@ -481,8 +481,8 @@ class ArrayWriter {
   }
 
   // Make sure user do not use those.
-  ArrayWriter() = default;
-  ArrayWriter(const ArrayWriter<V>&) = default;
+  ArrayWriter<V>() = default;
+  ArrayWriter<V>(const ArrayWriter<V>&) = default;
   ArrayWriter<V>& operator=(const ArrayWriter<V>&) = default;
 
   void commitMostRecentChildItem() {
@@ -680,9 +680,9 @@ class MapWriter {
 
  private:
   // Make sure user do not use those.
-  MapWriter() = default;
+  MapWriter<K, V>() = default;
 
-  MapWriter(const MapWriter<K, V>&) = default;
+  MapWriter<K, V>(const MapWriter<K, V>&) = default;
 
   MapWriter<K, V>& operator=(const MapWriter<K, V>&) = default;
 
@@ -1016,6 +1016,10 @@ class GenericWriter {
 
   template <typename ToType>
   typename VectorWriter<ToType, void>::exec_out_t& castTo() {
+    static_assert(
+        !isGenericType<ToType>::value,
+        "Cast to generic is useless and recursive");
+
     VELOX_USER_DCHECK(
         CastTypeChecker<ToType>::check(type()),
         "castTo type is not compatible with type of vector, vector type is {}, casted to type is {}",
@@ -1123,8 +1127,10 @@ class GenericWriter {
   }
 
   BaseVector* vector_;
+
   std::shared_ptr<VectorWriterBase>& castWriter_;
   TypePtr& castType_;
+
   vector_size_t& index_;
 
   template <typename A, typename B>

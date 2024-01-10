@@ -215,7 +215,7 @@ void BlockingState::setResume(std::shared_ptr<BlockingState> state) {
                   "A ContinueFuture for task {} was realized with error: {}",
                   state->driver_->task()->taskId(),
                   e.what())
-            } catch (const VeloxException& eNew) {
+            } catch (const VeloxException&) {
               state->driver_->task()->setError(std::current_exception());
             }
           });
@@ -347,15 +347,6 @@ RowVectorPtr Driver::next(std::shared_ptr<BlockingState>& blockingState) {
       stop == StopReason::kAlreadyTerminated);
 
   return result;
-}
-
-std::shared_ptr<Driver> Driver::testingCreate(std::unique_ptr<DriverCtx> ctx) {
-  auto driver = new Driver();
-  if (ctx != nullptr) {
-    ctx->driver = driver;
-    driver->ctx_ = std::move(ctx);
-  }
-  return std::shared_ptr<Driver>(driver);
 }
 
 void Driver::enqueueInternal() {
@@ -736,11 +727,11 @@ StopReason Driver::runInternal(
         }
       }
     }
-  } catch (velox::VeloxException& e) {
+  } catch (velox::VeloxException&) {
     task()->setError(std::current_exception());
     // The CancelPoolGuard will close 'self' and remove from Task.
     return StopReason::kAlreadyTerminated;
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     task()->setError(std::current_exception());
     // The CancelGuard will close 'self' and remove from Task.
     return StopReason::kAlreadyTerminated;

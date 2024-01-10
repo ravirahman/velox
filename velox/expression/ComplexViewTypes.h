@@ -238,7 +238,7 @@ class SkipNullsIterator {
   using reference = value_type;
 
  public:
-  SkipNullsIterator(
+  SkipNullsIterator<BaseIterator>(
       const BaseIterator& begin,
       const BaseIterator& end)
       : iter_(begin), end_(end) {}
@@ -1152,7 +1152,6 @@ class GenericView {
         index_); // We pass the non-decoded index.
   }
 
- private:
   template <typename B>
   VectorReader<B>* ensureReader() const {
     static_assert(
@@ -1163,7 +1162,6 @@ class GenericView {
     // the user is always casting to the same type.
     // Types are divided into three sets, for 1, and 2 we do not do the check,
     // since no two types can ever refer to the same vector.
-
     if constexpr (!HasGeneric<B>::value()) {
       // Two types with no generic can never represent same vector.
       return ensureReaderImpl<B, 0>();
@@ -1190,6 +1188,7 @@ class GenericView {
     }
   }
 
+ private:
   template <typename B, size_t I>
   VectorReader<B>* ensureReaderImpl() const {
     auto* reader = static_cast<VectorReader<B>*>(castReaders_[I].get());

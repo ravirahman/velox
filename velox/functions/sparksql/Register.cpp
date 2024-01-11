@@ -41,6 +41,7 @@
 #include "velox/functions/sparksql/UnscaledValueFunction.h"
 #include "velox/functions/sparksql/specialforms/DecimalRound.h"
 #include "velox/functions/sparksql/specialforms/MakeDecimal.h"
+#include "velox/functions/sparksql/specialforms/SparkCastExpr.h"
 
 namespace facebook::velox::functions {
 extern void registerElementAtFunction(
@@ -89,6 +90,10 @@ void registerAllSpecialFormGeneralFunctions() {
   exec::registerFunctionCallToSpecialForm(
       DecimalRoundCallToSpecialForm::kRoundDecimal,
       std::make_unique<DecimalRoundCallToSpecialForm>());
+  registerFunctionCallToSpecialForm(
+      "cast", std::make_unique<SparkCastCallToSpecialForm>());
+  registerFunctionCallToSpecialForm(
+      "try_cast", std::make_unique<SparkTryCastCallToSpecialForm>());
 }
 
 namespace {
@@ -290,6 +295,9 @@ void registerFunctions(const std::string& prefix) {
   registerFunction<MonthFunction, int32_t, Date>({prefix + "month"});
 
   registerFunction<NextDayFunction, Date, Date, Varchar>({prefix + "next_day"});
+
+  registerFunction<GetTimestampFunction, Timestamp, Varchar, Varchar>(
+      {prefix + "get_timestamp"});
 
   // Register bloom filter function
   registerFunction<BloomFilterMightContainFunction, bool, Varbinary, int64_t>(

@@ -20,6 +20,7 @@
 #include <sys/types.h>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace facebook {
 namespace velox {

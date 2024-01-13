@@ -238,7 +238,7 @@ class SkipNullsIterator {
   using reference = value_type;
 
  public:
-  SkipNullsIterator<BaseIterator>(
+  SkipNullsIterator(
       const BaseIterator& begin,
       const BaseIterator& end)
       : iter_(begin), end_(end) {}

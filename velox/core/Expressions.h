@@ -55,12 +55,13 @@ class ConstantTypedExpr : public ITypedExpr {
   // Creates constant expression. For complex types, only
   // variant::null() value is supported.
   ConstantTypedExpr(TypePtr type, variant value)
-      : ITypedExpr{std::move(type)}, value_{std::move(value)} {}
+      : ITypedExpr{std::move(type)}, pool_(nullptr), value_{std::move(value)} {}
 
   // Creates constant expression of scalar or complex type. The value comes from
   // index zero.
-  explicit ConstantTypedExpr(const VectorPtr& value)
+  explicit ConstantTypedExpr(const VectorPtr& value, const std::shared_ptr<facebook::velox::memory::MemoryPool> & pool = nullptr)
       : ITypedExpr{value->type()},
+        pool_(pool),
         valueVector_{
             value->isConstantEncoding()
                 ? value
@@ -156,6 +157,7 @@ class ConstantTypedExpr : public ITypedExpr {
   static TypedExprPtr create(const folly::dynamic& obj, void* context);
 
  private:
+  const std::shared_ptr<facebook::velox::memory::MemoryPool> pool_;
   const variant value_;
   const VectorPtr valueVector_;
 };

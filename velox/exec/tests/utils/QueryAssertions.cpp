@@ -40,6 +40,30 @@ template <TypeKind kind>
 }
 
 template <>
+::duckdb::Value duckValueAt<TypeKind::TINYINT>(
+    const VectorPtr& vector,
+    vector_size_t index) {
+  return ::duckdb::Value::TINYINT(
+      vector->as<SimpleVector<int8_t>>()->valueAt(index));
+}
+
+template <>
+::duckdb::Value duckValueAt<TypeKind::SMALLINT>(
+    const VectorPtr& vector,
+    vector_size_t index) {
+  return ::duckdb::Value::SMALLINT(
+      vector->as<SimpleVector<int16_t>>()->valueAt(index));
+}
+
+template <>
+::duckdb::Value duckValueAt<TypeKind::BOOLEAN>(
+    const VectorPtr& vector,
+    vector_size_t index) {
+  return ::duckdb::Value::BOOLEAN(
+      vector->as<SimpleVector<bool>>()->valueAt(index));
+}
+
+template <>
 ::duckdb::Value duckValueAt<TypeKind::VARCHAR>(
     const VectorPtr& vector,
     vector_size_t index) {
@@ -1295,7 +1319,7 @@ std::pair<std::unique_ptr<TaskCursor>, std::vector<RowVectorPtr>> readCursor(
     const CursorParameters& params,
     std::function<void(exec::Task*)> addSplits,
     uint64_t maxWaitMicros) {
-  auto cursor = std::make_unique<TaskCursor>(params);
+  auto cursor = TaskCursor::create(params);
   // 'result' borrows memory from cursor so the life cycle must be shorter.
   std::vector<RowVectorPtr> result;
   auto* task = cursor->task().get();

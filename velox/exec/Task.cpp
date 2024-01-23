@@ -749,7 +749,7 @@ void Task::createAndStartDrivers(uint32_t concurrentSplitGroups) {
     }
 
     // Set and start all Drivers together inside 'mutex_' so that
-    // cancellations and pauses have the well defined timing. For example, do
+    // cancellations and pauses have the well-defined timing. For example, do
     // not pause and restart a task while it is still adding Drivers.
     //
     // NOTE: the executor must not be folly::InlineLikeExecutor for parallel
@@ -1979,8 +1979,30 @@ TaskStats Task::taskStats() const {
   auto bufferManager = bufferManager_.lock();
   taskStats.outputBufferUtilization = bufferManager->getUtilization(taskId_);
   taskStats.outputBufferOverutilized = bufferManager->isOverutilized(taskId_);
-
+  taskStats.outputBufferStats = bufferManager->stats(taskId_);
   return taskStats;
+}
+
+void Task::getLongRunningOpCalls(
+    size_t thresholdDurationMs,
+    std::vector<OpCallInfo>& out) const {
+  std::lock_guard<std::mutex> l(mutex_);
+  for (const auto& driver : drivers_) {
+    if (driver) {
+      const auto opCallStatus = driver->opCallStatus();
+      if (!opCallStatus.empty()) {
+        auto callDurationMs = opCallStatus.callDuration();
+        if (callDurationMs > thresholdDurationMs) {
+          out.push_back({
+              .durationMs = callDurationMs,
+              .tid = driver->state().tid,
+              .opId = opCallStatus.opId,
+              .taskId = taskId_,
+          });
+        }
+      }
+    }
+  }
 }
 
 uint64_t Task::timeSinceStartMs() const {
@@ -2513,8 +2535,9 @@ void Task::createExchangeClientLocked(
   exchangeClients_[pipelineId] = std::make_shared<ExchangeClient>(
       taskId_,
       destination_,
+      queryCtx()->queryConfig().maxExchangeBufferSize(),
       addExchangeClientPool(planNodeId, pipelineId),
-      queryCtx()->queryConfig().maxExchangeBufferSize());
+      queryCtx()->executor());
   exchangeClientByPlanNode_.emplace(planNodeId, exchangeClients_[pipelineId]);
 }
 

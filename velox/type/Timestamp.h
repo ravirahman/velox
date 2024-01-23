@@ -24,11 +24,11 @@
 #include "velox/common/base/CheckedArithmetic.h"
 #include "velox/type/StringView.h"
 
+namespace facebook::velox {
+
 namespace date {
 class time_zone;
 }
-
-namespace facebook::velox {
 
 struct TimestampToStringOptions {
   enum class Precision : int8_t {
@@ -274,6 +274,9 @@ struct Timestamp {
 
   // Same as above, but accepts PrestoDB time zone ID.
   void toTimezone(int16_t tzID);
+
+  /// A default time zone that is same across the process.
+  static const date::time_zone& defaultTimezone();
 
   bool operator==(const Timestamp& b) const {
     return seconds_ == b.seconds_ && nanos_ == b.nanos_;

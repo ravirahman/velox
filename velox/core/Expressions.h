@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <iomanip>
 #include "velox/common/base/Exceptions.h"
 #include "velox/core/ITypedExpr.h"
 #include "velox/vector/BaseVector.h"
@@ -321,12 +322,15 @@ class FieldAccessTypedExpr : public ITypedExpr {
   }
 
   std::string toString() const override {
+    std::stringstream ss;
+    ss << std::quoted(name(), '"', '"');
     if (inputs().empty()) {
-      return fmt::format("{}", std::quoted(name(), '"', '"'));
+      return fmt::format("{}", ss.str());
+      ;
     }
 
-    return fmt::format(
-        "{}[{}]", inputs()[0]->toString(), std::quoted(name(), '"', '"'));
+    return fmt::format("{}[{}]", inputs()[0]->toString(), ss.str());
+    ;
   }
 
   size_t localHash() const override {
@@ -403,8 +407,7 @@ class DereferenceTypedExpr : public ITypedExpr {
   }
 
   std::string toString() const override {
-    return fmt::format(
-        "{}[{}]", inputs()[0]->toString(), std::quoted(name(), '"', '"'));
+    return fmt::format("{}[{}]", inputs()[0]->toString(), name());
   }
 
   size_t localHash() const override {

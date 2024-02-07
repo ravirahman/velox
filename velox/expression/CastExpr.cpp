@@ -16,6 +16,7 @@
 
 #include "velox/expression/CastExpr.h"
 
+#include <common/base/Status.h>
 #include <fmt/format.h>
 #include <stdexcept>
 
@@ -114,6 +115,7 @@ Status detail::parseDecimalComponents(
 Status detail::parseHugeInt(
     const DecimalComponents& decimalComponents,
     int128_t& out) {
+#ifdef FOLLY_HAVE_INT128_T 
   // Parse the whole digits.
   if (decimalComponents.wholeDigits.size() > 0) {
     const auto tryValue = folly::tryTo<int128_t>(folly::StringPiece(
@@ -142,6 +144,9 @@ Status detail::parseHugeInt(
     VELOX_DCHECK(!overflow);
   }
   return Status::OK();
+#else
+  return Status::NotImplemented("int128 is not supported");
+#endif
 }
 
 VectorPtr CastExpr::castFromDate(

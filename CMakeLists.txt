@@ -436,7 +436,7 @@ if(${VELOX_BUILD_PYTHON_PACKAGE})
 endif()
 
 set_source(simdjson)
-resolve_dependency(simdjson 3.8.0)
+resolve_dependency(simdjson 3.6.2)
 
 # Locate or build folly.
 set_source(folly)

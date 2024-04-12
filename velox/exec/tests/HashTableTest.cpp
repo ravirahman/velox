@@ -59,11 +59,12 @@ class HashTableTestHelper {
   }
 
   void insertForJoin(
+      RowContainer* rows,
       char** groups,
       uint64_t* hashes,
       int32_t numGroups,
       TableInsertPartitionInfo* partitionInfo) {
-    table_->insertForJoin(groups, hashes, numGroups, partitionInfo);
+    table_->insertForJoin(rows, groups, hashes, numGroups, partitionInfo);
   }
 
   void setHashMode(BaseHashTable::HashMode mode, int32_t numNew) {
@@ -140,7 +141,7 @@ class HashTableTest : public testing::TestWithParam<bool>,
       makeRows(size, 1, sequence, buildType, batches);
       copyVectorsToTable(batches, startOffset, table.get());
       sequence += size;
-      if (!topTable_) {
+      if (topTable_ == nullptr) {
         topTable_ = std::move(table);
         numRows += topTable_->rows()->numRows();
       } else {
@@ -159,6 +160,13 @@ class HashTableTest : public testing::TestWithParam<bool>,
         estimatedTableSize,
         topTable_->rows()->pool()->currentBytes() - usedMemoryBytes);
     ASSERT_EQ(topTable_->hashMode(), mode);
+    ASSERT_EQ(topTable_->allRows().size(), numWays);
+    uint64_t rowCount{0};
+    for (auto* rowContainer : topTable_->allRows()) {
+      rowCount += rowContainer->numRows();
+    }
+    ASSERT_EQ(rowCount, numRows);
+
     LOG(INFO) << "Made table " << describeTable();
     testProbe();
     testEraseEveryN(3);
@@ -166,6 +174,13 @@ class HashTableTest : public testing::TestWithParam<bool>,
     testEraseEveryN(4);
     testProbe();
     testGroupBySpill(size, buildType, numKeys);
+    const auto memoryUsage = pool()->currentBytes();
+    topTable_->clear(true);
+    for (const auto* rowContainer : topTable_->allRows()) {
+      ASSERT_EQ(rowContainer->numRows(), 0);
+    }
+    ASSERT_EQ(topTable_->numDistinct(), 0);
+    ASSERT_LT(pool()->currentBytes(), memoryUsage);
   }
 
   // Inserts and deletes rows in a HashTable, similarly to a group by
@@ -622,9 +637,11 @@ TEST_P(HashTableTest, clear) {
       BIGINT(),
       config);
 
-  auto table = HashTable<true>::createForAggregation(
-      std::move(keyHashers), {Accumulator{aggregate.get(), nullptr}}, pool());
-  ASSERT_NO_THROW(table->clear());
+  for (const bool clearTable : {false, true}) {
+    auto table = HashTable<true>::createForAggregation(
+        std::move(keyHashers), {Accumulator{aggregate.get(), nullptr}}, pool());
+    ASSERT_NO_THROW(table->clear(clearTable));
+  }
 }
 
 // Test a specific code path in HashTable::decodeHashMode where

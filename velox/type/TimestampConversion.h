@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include "velox/common/base/Status.h"
 #include "velox/type/Timestamp.h"
 
 namespace facebook::velox::util {
@@ -55,23 +56,29 @@ bool isValidDayOfYear(int32_t year, int32_t dayOfYear);
 // Returns max day of month for inputted month of inputted year
 int32_t getMaxDayOfMonth(int32_t year, int32_t month);
 
-// Returns last day of month since unix epoch (1970-01-01).
-int64_t lastDayOfMonthSinceEpochFromDate(const std::tm& dateTime);
+/// Computes the last day of month since unix epoch (1970-01-01).
+/// Returns UserError status if the date is invalid.
+Status lastDayOfMonthSinceEpochFromDate(const std::tm& dateTime, int64_t& out);
 
 /// Date conversions.
 
-/// Returns the (signed) number of days since unix epoch (1970-01-01).
-/// Throws VeloxUserError if the date is invalid.
-int64_t daysSinceEpochFromDate(int32_t year, int32_t month, int32_t day);
+/// Computes the (signed) number of days since unix epoch (1970-01-01).
+/// Returns UserError status if the date is invalid.
+Status
+daysSinceEpochFromDate(int32_t year, int32_t month, int32_t day, int64_t& out);
 
-/// Returns the (signed) number of days since unix epoch (1970-01-01).
-int64_t daysSinceEpochFromWeekDate(
+/// Computes the (signed) number of days since unix epoch (1970-01-01).
+/// Returns UserError status if the date is invalid.
+Status daysSinceEpochFromWeekDate(
     int32_t weekYear,
     int32_t weekOfYear,
-    int32_t dayOfWeek);
+    int32_t dayOfWeek,
+    int64_t& out);
 
-/// Returns the (signed) number of days since unix epoch (1970-01-01).
-int64_t daysSinceEpochFromDayOfYear(int32_t year, int32_t dayOfYear);
+/// Computes the (signed) number of days since unix epoch (1970-01-01).
+/// Returns UserError status if the date is invalid.
+Status
+daysSinceEpochFromDayOfYear(int32_t year, int32_t dayOfYear, int64_t& out);
 
 /// Returns the (signed) number of days since unix epoch (1970-01-01), following
 /// the "YYYY-MM-DD" format (ISO 8601). ' ', '/' and '\' are also acceptable
@@ -113,7 +120,7 @@ int64_t
 fromTime(int32_t hour, int32_t minute, int32_t second, int32_t microseconds);
 
 /// Parses the input string and returns the number of cumulative microseconds,
-/// following the "HH:MM:SS[.MS]" format (ISO 8601).
+/// following the "HH:MM[:SS[.MS]]" format (ISO 8601).
 //
 /// Throws VeloxUserError if the format or time is invalid.
 int64_t fromTimeString(const char* buf, size_t len);
@@ -125,7 +132,7 @@ inline int64_t fromTimeString(const StringView& str) {
 // Timestamp conversion
 
 /// Parses a full ISO 8601 timestamp string, following the format
-/// "YYYY-MM-DD HH:MM:SS[.MS] +00:00"
+/// "YYYY-MM-DD HH:MM[:SS[.MS]] +00:00"
 Timestamp fromTimestampString(const char* buf, size_t len);
 
 inline Timestamp fromTimestampString(const StringView& str) {

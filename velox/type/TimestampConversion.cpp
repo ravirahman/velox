@@ -218,7 +218,9 @@ bool tryParseDateString(
 
   // No month or day.
   if (mode == ParseMode::kNonStandardCast && pos == len) {
-    daysSinceEpoch = daysSinceEpochFromDate(year, 1, 1);
+    if (!daysSinceEpochFromDate(year, 1, 1, daysSinceEpoch).ok()) {
+      return false;
+    }
     return validDate(daysSinceEpoch);
   }
 
@@ -247,7 +249,9 @@ bool tryParseDateString(
 
   // No day.
   if (mode == ParseMode::kNonStandardCast && pos == len) {
-    daysSinceEpoch = daysSinceEpochFromDate(year, month, 1);
+    if (!daysSinceEpochFromDate(year, month, 1, daysSinceEpoch).ok()) {
+      return false;
+    }
     return validDate(daysSinceEpoch);
   }
 
@@ -269,7 +273,9 @@ bool tryParseDateString(
   }
 
   if (mode == ParseMode::kStandardCast) {
-    daysSinceEpoch = daysSinceEpochFromDate(year, month, day);
+    if (!daysSinceEpochFromDate(year, month, day, daysSinceEpoch).ok()) {
+      return false;
+    }
 
     if (pos == len) {
       return validDate(daysSinceEpoch);
@@ -280,7 +286,9 @@ bool tryParseDateString(
   // In non-standard cast mode, an optional trailing 'T' or space followed
   // by any optional characters are valid patterns.
   if (mode == ParseMode::kNonStandardCast) {
-    daysSinceEpoch = daysSinceEpochFromDate(year, month, day);
+    if (!daysSinceEpochFromDate(year, month, day, daysSinceEpoch).ok()) {
+      return false;
+    }
 
     if (!validDate(daysSinceEpoch)) {
       return false;
@@ -327,11 +335,11 @@ bool tryParseDateString(
     }
   }
 
-  daysSinceEpoch = daysSinceEpochFromDate(year, month, day);
-  return true;
+  return daysSinceEpochFromDate(year, month, day, daysSinceEpoch).ok();
 }
 
-// String format is hh:mm:ss.microseconds (microseconds are optional).
+// String format is hh:mm:ss.microseconds (seconds and microseconds are
+// optional).
 // ISO 8601
 bool tryParseTimeString(
     const char* buf,
@@ -339,7 +347,7 @@ bool tryParseTimeString(
     size_t& pos,
     int64_t& result,
     bool strict) {
-  int32_t hour = -1, min = -1, sec = -1, micros = -1;
+  int32_t hour = 0, min = 0, sec = 0, micros = 0;
   pos = 0;
 
   if (len == 0) {
@@ -359,6 +367,7 @@ bool tryParseTimeString(
     return false;
   }
 
+  // Read the hours.
   if (!parseDoubleDigit(buf, len, pos, hour)) {
     return false;
   }
@@ -377,6 +386,7 @@ bool tryParseTimeString(
     return false;
   }
 
+  // Read the minutes.
   if (!parseDoubleDigit(buf, len, pos, min)) {
     return false;
   }
@@ -384,29 +394,30 @@ bool tryParseTimeString(
     return false;
   }
 
-  if (pos >= len) {
-    return false;
-  }
+  // Try to read seconds.
+  if (pos < len && buf[pos] == sep) {
+    ++pos;
+    if (!parseDoubleDigit(buf, len, pos, sec)) {
+      return false;
+    }
+    if (sec < 0 || sec > 60) {
+      return false;
+    }
 
-  if (buf[pos++] != sep) {
-    return false;
-  }
+    // Try to read microseconds.
+    if (pos < len && buf[pos] == '.') {
+      ++pos;
 
-  if (!parseDoubleDigit(buf, len, pos, sec)) {
-    return false;
-  }
-  if (sec < 0 || sec > 60) {
-    return false;
-  }
+      if (pos >= len) {
+        return false;
+      }
 
-  micros = 0;
-  if (pos < len && buf[pos] == '.') {
-    pos++;
-    // We expect microseconds.
-    int32_t mult = 100000;
-    for (; pos < len && characterIsDigit(buf[pos]); pos++, mult /= 10) {
-      if (mult > 0) {
-        micros += (buf[pos] - '0') * mult;
+      // We expect microseconds.
+      int32_t mult = 100000;
+      for (; pos < len && characterIsDigit(buf[pos]); pos++, mult /= 10) {
+        if (mult > 0) {
+          micros += (buf[pos] - '0') * mult;
+        }
       }
     }
   }
@@ -516,22 +527,23 @@ bool isValidDayOfYear(int32_t year, int32_t dayOfYear) {
   return true;
 }
 
-int64_t lastDayOfMonthSinceEpochFromDate(const std::tm& dateTime) {
+Status lastDayOfMonthSinceEpochFromDate(const std::tm& dateTime, int64_t& out) {
   auto year = dateTime.tm_year + 1900;
   auto month = dateTime.tm_mon + 1;
   auto day = util::getMaxDayOfMonth(year, month);
-  return util::daysSinceEpochFromDate(year, month, day);
+  return util::daysSinceEpochFromDate(year, month, day, out);
 }
 
 int32_t getMaxDayOfMonth(int32_t year, int32_t month) {
   return isLeapYear(year) ? kLeapDays[month] : kNormalDays[month];
 }
 
-int64_t daysSinceEpochFromDate(int32_t year, int32_t month, int32_t day) {
+Status
+daysSinceEpochFromDate(int32_t year, int32_t month, int32_t day, int64_t& out) {
   int64_t daysSinceEpoch = 0;
 
   if (!isValidDate(year, month, day)) {
-    VELOX_USER_FAIL("Date out of range: {}-{}-{}", year, month, day);
+    return Status::UserError("Date out of range: {}-{}-{}", year, month, day);
   }
   while (year < 1970) {
     year += kYearInterval;
@@ -545,32 +557,40 @@ int64_t daysSinceEpochFromDate(int32_t year, int32_t month, int32_t day) {
   daysSinceEpoch += isLeapYear(year) ? kCumulativeLeapDays[month - 1]
                                      : kCumulativeDays[month - 1];
   daysSinceEpoch += day - 1;
-  return daysSinceEpoch;
+  out = daysSinceEpoch;
+  return Status::OK();
 }
 
-int64_t daysSinceEpochFromWeekDate(
+Status daysSinceEpochFromWeekDate(
     int32_t weekYear,
     int32_t weekOfYear,
-    int32_t dayOfWeek) {
+    int32_t dayOfWeek,
+    int64_t& out) {
   if (!isValidWeekDate(weekYear, weekOfYear, dayOfWeek)) {
-    VELOX_USER_FAIL(
+    return Status::UserError(
         "Date out of range: {}-{}-{}", weekYear, weekOfYear, dayOfWeek);
   }
 
-  int64_t daysSinceEpochOfJanFourth = daysSinceEpochFromDate(weekYear, 1, 4);
+  int64_t daysSinceEpochOfJanFourth;
+  VELOX_RETURN_NOT_OK(
+      daysSinceEpochFromDate(weekYear, 1, 4, daysSinceEpochOfJanFourth));
   int32_t firstDayOfWeekYear =
       extractISODayOfTheWeek(daysSinceEpochOfJanFourth);
 
-  return daysSinceEpochOfJanFourth - (firstDayOfWeekYear - 1) +
+  out = daysSinceEpochOfJanFourth - (firstDayOfWeekYear - 1) +
       7 * (weekOfYear - 1) + dayOfWeek - 1;
+  return Status::OK();
 }
 
-int64_t daysSinceEpochFromDayOfYear(int32_t year, int32_t dayOfYear) {
+Status
+daysSinceEpochFromDayOfYear(int32_t year, int32_t dayOfYear, int64_t& out) {
   if (!isValidDayOfYear(year, dayOfYear)) {
-    VELOX_USER_FAIL("Day of year out of range: {}", dayOfYear);
+    return Status::UserError("Day of year out of range: {}", dayOfYear);
   }
-  int64_t startOfYear = daysSinceEpochFromDate(year, 1, 1);
-  return startOfYear + (dayOfYear - 1);
+  int64_t startOfYear;
+  VELOX_RETURN_NOT_OK(daysSinceEpochFromDate(year, 1, 1, startOfYear));
+  out = startOfYear + (dayOfYear - 1);
+  return Status::OK();
 }
 
 int64_t fromDateString(const char* str, size_t len) {
@@ -671,7 +691,7 @@ Timestamp fromDatetime(int64_t daysSinceEpoch, int64_t microsSinceMidnight) {
 
 namespace {
 
-void parserError(const char* str, size_t len) {
+[[noreturn]] void parserError(const char* str, size_t len) {
   VELOX_USER_FAIL(
       "Unable to parse timestamp value: \"{}\", "
       "expected format is (YYYY-MM-DD HH:MM:SS[.MS])",

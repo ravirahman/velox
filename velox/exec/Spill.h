@@ -18,6 +18,7 @@
 
 #include <folly/container/F14Set.h>
 
+#include <re2/re2.h>
 #include "velox/common/base/SpillConfig.h"
 #include "velox/common/base/SpillStats.h"
 #include "velox/common/compression/Compression.h"
@@ -131,9 +132,10 @@ class FileSpillMergeStream : public SpillMergeStream {
  public:
   static std::unique_ptr<SpillMergeStream> create(
       std::unique_ptr<SpillReadFile> spillFile) {
-    auto* spillStream = new FileSpillMergeStream(std::move(spillFile));
-    spillStream->nextBatch();
-    return std::unique_ptr<SpillMergeStream>(spillStream);
+    auto spillStream = std::unique_ptr<SpillMergeStream>(
+        new FileSpillMergeStream(std::move(spillFile)));
+    static_cast<FileSpillMergeStream*>(spillStream.get())->nextBatch();
+    return spillStream;
   }
 
   uint32_t id() const override;
@@ -288,13 +290,19 @@ class SpillPartition {
 
   /// Invoked to create an unordered stream reader from this spill partition.
   /// The created reader will take the ownership of the spill files.
+  /// 'spillStats' is provided to collect the spill stats when reading data from
+  /// spilled files.
   std::unique_ptr<UnorderedStreamReader<BatchStream>> createUnorderedReader(
-      memory::MemoryPool* pool);
+      memory::MemoryPool* pool,
+      folly::Synchronized<common::SpillStats>* spillStats);
 
   /// Invoked to create an ordered stream reader from this spill partition.
   /// The created reader will take the ownership of the spill files.
+  /// 'spillStats' is provided to collect the spill stats when reading data from
+  /// spilled files.
   std::unique_ptr<TreeOfLosers<SpillMergeStream>> createOrderedReader(
-      memory::MemoryPool* pool);
+      memory::MemoryPool* pool,
+      folly::Synchronized<common::SpillStats>* spillStats);
 
   std::string toString() const;
 
@@ -379,6 +387,12 @@ class SpillState {
   /// far.
   void finishFile(uint32_t partition);
 
+  /// Returns the current number of finished files from a given partition.
+  ///
+  /// NOTE: the fucntion returns zero if the state has finished or the partition
+  /// is not spilled yet.
+  size_t numFinishedFiles(uint32_t partition) const;
+
   /// Returns the spill file objects from a given 'partition'. The function
   /// returns an empty list if either the partition has not been spilled or has
   /// no spilled data.
@@ -434,6 +448,35 @@ class SpillState {
 /// Generate partition id set from given spill partition set.
 SpillPartitionIdSet toSpillPartitionIdSet(
     const SpillPartitionSet& partitionSet);
+
+/// Scoped spill percentage utility that allows user to set the behavior of
+/// triggered spill.
+/// 'spillPct' indicates the chance of triggering spilling. 100% means spill
+/// will always be triggered.
+/// 'pools' is a regular expression string used to define the specific memory
+/// pools targeted for injecting spilling.
+/// 'maxInjections' indicates the max number of actual triggering. e.g. when
+/// 'spillPct' is 20 and 'maxInjections' is 10, continuous calls to
+/// testingTriggerSpill(poolName) will keep rolling the dice that has a
+/// chance of 20% triggering until 10 triggers have been invoked.
+class TestScopedSpillInjection {
+ public:
+  explicit TestScopedSpillInjection(
+      int32_t spillPct,
+      const std::string& poolRegExp = ".*",
+      uint32_t maxInjections = std::numeric_limits<uint32_t>::max());
+
+  ~TestScopedSpillInjection();
+};
+
+/// Test utility that returns true if triggered spill is evaluated to happen,
+/// false otherwise.
+bool testingTriggerSpill(const std::string& poolName = "");
+
+tsan_atomic<uint32_t>& injectedSpillCount();
+
+/// Removes empty partitions from given spill partition set.
+void removeEmptyPartitions(SpillPartitionSet& partitionSet);
 } // namespace facebook::velox::exec
 
 // Adding the custom hash for SpillPartitionId to std::hash to make it usable

@@ -26,6 +26,7 @@
 namespace facebook::velox::connector::hive {
 
 class HiveColumnHandle;
+class HiveTableHandle;
 class HiveConfig;
 struct HiveConnectorSplit;
 
@@ -39,7 +40,10 @@ const std::string& getColumnName(const common::Subfield& subfield);
 
 void checkColumnNameLowerCase(const std::shared_ptr<const Type>& type);
 
-void checkColumnNameLowerCase(const SubfieldFilters& filters);
+void checkColumnNameLowerCase(
+    const SubfieldFilters& filters,
+    const std::unordered_map<std::string, std::shared_ptr<HiveColumnHandle>>&
+        infoColumns);
 
 void checkColumnNameLowerCase(const core::TypedExprPtr& typeExpr);
 
@@ -51,35 +55,40 @@ std::shared_ptr<common::ScanSpec> makeScanSpec(
     const RowTypePtr& dataColumns,
     const std::unordered_map<std::string, std::shared_ptr<HiveColumnHandle>>&
         partitionKeys,
+    const std::unordered_map<std::string, std::shared_ptr<HiveColumnHandle>>&
+        infoColumns,
     memory::MemoryPool* pool);
 
 void configureReaderOptions(
     dwio::common::ReaderOptions& readerOptions,
-    const std::shared_ptr<HiveConfig>& config,
+    const std::shared_ptr<const HiveConfig>& config,
+    const Config* sessionProperties,
+    const std::shared_ptr<const HiveTableHandle>& hiveTableHandle,
+    const std::shared_ptr<const HiveConnectorSplit>& hiveSplit);
+
+void configureReaderOptions(
+    dwio::common::ReaderOptions& readerOptions,
+    const std::shared_ptr<const HiveConfig>& hiveConfig,
     const Config* sessionProperties,
     const RowTypePtr& fileSchema,
-    std::shared_ptr<HiveConnectorSplit> hiveSplit);
+    const std::shared_ptr<const HiveConnectorSplit>& hiveSplit,
+    const std::unordered_map<std::string, std::string>& tableParameters = {});
 
 void configureRowReaderOptions(
     dwio::common::RowReaderOptions& rowReaderOptions,
     const std::unordered_map<std::string, std::string>& tableParameters,
-    std::shared_ptr<common::ScanSpec> scanSpec,
-    std::shared_ptr<common::MetadataFilter> metadataFilter,
+    const std::shared_ptr<common::ScanSpec>& scanSpec,
+    const std::shared_ptr<common::MetadataFilter>& metadataFilter,
     const RowTypePtr& rowType,
-    std::shared_ptr<HiveConnectorSplit> hiveSplit);
-
-bool applyPartitionFilter(
-    TypeKind kind,
-    const std::string& partitionValue,
-    common::Filter* filter);
+    const std::shared_ptr<const HiveConnectorSplit>& hiveSplit);
 
 bool testFilters(
-    common::ScanSpec* scanSpec,
-    dwio::common::Reader* reader,
+    const common::ScanSpec* scanSpec,
+    const dwio::common::Reader* reader,
     const std::string& filePath,
     const std::unordered_map<std::string, std::optional<std::string>>&
         partitionKey,
-    std::unordered_map<std::string, std::shared_ptr<HiveColumnHandle>>*
+    const std::unordered_map<std::string, std::shared_ptr<HiveColumnHandle>>&
         partitionKeysHandle);
 
 std::unique_ptr<dwio::common::BufferedInput> createBufferedInput(
@@ -88,5 +97,12 @@ std::unique_ptr<dwio::common::BufferedInput> createBufferedInput(
     const ConnectorQueryCtx* connectorQueryCtx,
     std::shared_ptr<io::IoStatistics> ioStats,
     folly::Executor* executor);
+
+core::TypedExprPtr extractFiltersFromRemainingFilter(
+    const core::TypedExprPtr& expr,
+    core::ExpressionEvaluator* evaluator,
+    bool negated,
+    SubfieldFilters& filters,
+    double& sampleRate);
 
 } // namespace facebook::velox::connector::hive

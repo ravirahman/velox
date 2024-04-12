@@ -29,15 +29,18 @@ struct OperatorStats;
 
 /// Stores execution stats per pipeline.
 struct PipelineStats {
-  // Cumulative OperatorStats for finished Drivers. The subscript is the
-  // operator id, which is the initial ordinal position of the
-  // operator in the DriverFactory.
+  /// Cumulative OperatorStats for finished Drivers. The subscript is the
+  /// operator id, which is the initial ordinal position of the operator in the
+  /// DriverFactory.
   std::vector<OperatorStats> operatorStats;
 
-  // True if contains the source node for the task.
+  /// Runtime statistics per driver.
+  std::vector<DriverStats> driverStats;
+
+  /// True if contains the source node for the task.
   bool inputPipeline;
 
-  // True if contains the sync node for the task.
+  /// True if contains the sync node for the task.
   bool outputPipeline;
 
   PipelineStats(bool _inputPipeline, bool _outputPipeline)
@@ -51,6 +54,12 @@ struct TaskStats {
   int32_t numRunningSplits{0};
   int32_t numQueuedSplits{0};
   std::unordered_set<int32_t> completedSplitGroups;
+
+  /// Table scan split stats.
+  int32_t numRunningTableScanSplits{0};
+  int32_t numQueuedTableScanSplits{0};
+  int64_t runningTableScanSplitWeights{0};
+  int64_t queuedTableScanSplitWeights{0};
 
   /// The subscript is given by each Operator's
   /// DriverCtx::pipelineId. This is a sum total reflecting fully

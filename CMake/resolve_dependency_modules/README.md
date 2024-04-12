@@ -2,11 +2,11 @@
 Following is the list of libraries and their minimum version
 that Velox requires. Some of these libraries can be installed
 via a platform's package manager (eg. `brew` on MacOS).
-The versions of certain libraries is the default provided by 
+The versions of certain libraries is the default provided by
 the platform's package manager. Some libraries can be bundled
 by Velox. See details on bundling below.
 
-| Library Name      | Minimum Version | Bundled? | 
+| Library Name      | Minimum Version | Bundled? |
 |-------------------|-----------------|----------|
 | ninja             | default         | No       |
 | ccache            | default         | No       |
@@ -16,7 +16,7 @@ by Velox. See details on bundling below.
 | gtest (testing)   | default         | Yes      |
 | libevent          | default         | No       |
 | libsodium         | default         | No       |
-| lz4               | default         | No       | 
+| lz4               | default         | No       |
 | snappy            | default         | No       |
 | lzo               | default         | No       |
 | xz                | default         | No       |
@@ -31,11 +31,12 @@ by Velox. See details on bundling below.
 | xsimd             | 10.0.0          | Yes      |
 | re2               | 2021-04-01      | Yes      |
 | fmt               | 10.1.1          | Yes      |
-| folly             | v2023.12.04.00  | Yes      |
-| fizz              | v2023.12.04.00  | No       |
-| wangle            | v2023.12.04.00  | No       |
-| mvfst             | v2023.12.04.00  | No       |
-| fbthrift          | v2023.12.04.00  | No       |
+| simdjson          | 3.8.0           | Yes      |
+| folly             | v2024.04.01.00  | Yes      |
+| fizz              | v2024.04.01.00  | No       |
+| wangle            | v2024.04.01.00  | No       |
+| mvfst             | v2024.04.01.00  | No       |
+| fbthrift          | v2024.04.01.00  | No       |
 | DuckDB (testing)  | 0.8.1           | Yes      |
 | cpr (testing)     | 1.10.15         | Yes      |
 
@@ -74,4 +75,3 @@ Ideally all patches should be upstream when possible and removed once merged.
 ## Specify a custom url/file path for an offline build
 
 Set environment variables `VELOX_<PACKAGE>_URL` to specify a custom dependency url or local tar file path, an optional sha256 checksum can be provided as `VELOX_<PACKAGE>_SHA256`.
-

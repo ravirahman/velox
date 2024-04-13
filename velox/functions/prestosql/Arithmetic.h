@@ -199,12 +199,13 @@ struct DecimalAbsFunction {
       const arg_type<ShortDecimal<P1, S1>>& a) {
     result = (a < 0) ? -a : a;
   }
-
+#ifdef FOLLY_HAVE_INT128_T
   FOLLY_ALWAYS_INLINE void call(
       out_type<LongDecimal<P1, S1>>& result,
       const arg_type<LongDecimal<P1, S1>>& a) {
     result = (a < 0) ? -a : a;
   }
+#endif
 };
 
 template <typename T>

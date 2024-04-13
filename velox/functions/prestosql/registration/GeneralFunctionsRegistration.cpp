@@ -40,7 +40,9 @@ inline void registerAllGreatestLeastFunctions(const std::string& prefix) {
   registerGreatestLeastFunction<float>(prefix);
   registerGreatestLeastFunction<double>(prefix);
   registerGreatestLeastFunction<Varchar>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerGreatestLeastFunction<LongDecimal<P1, S1>>(prefix);
+#endif
   registerGreatestLeastFunction<ShortDecimal<P1, S1>>(prefix);
   registerGreatestLeastFunction<Date>(prefix);
   registerGreatestLeastFunction<Timestamp>(prefix);

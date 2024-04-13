@@ -700,7 +700,7 @@ struct CastFromJsonTypedImpl {
             case simdjson::ondemand::number_type::unsigned_integer:
               w = num.get_uint64() != 0;
               break;
-            case simdjson::ondemand::number_type::big_integer:
+            default:
               VELOX_UNREACHABLE(); // value.get_number() would have failed
                                    // already.
           }
@@ -965,7 +965,7 @@ struct CastFromJsonTypedImpl {
             return convertIfInRange<T>(num.get_int64(), writer);
           case simdjson::ondemand::number_type::unsigned_integer:
             return simdjson::NUMBER_OUT_OF_RANGE;
-          case simdjson::ondemand::number_type::big_integer:
+          default:
             VELOX_UNREACHABLE(); // value.get_number() would have failed
                                  // already.
         }

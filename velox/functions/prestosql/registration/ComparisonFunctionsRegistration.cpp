@@ -96,12 +96,14 @@ void registerComparisonFunctions(const std::string& prefix) {
       {prefix + "between"});
   registerFunction<BetweenFunction, bool, Timestamp, Timestamp, Timestamp>(
       {prefix + "between"});
+#ifdef FOLLY_HAVE_INT128_T
   registerFunction<
       BetweenFunction,
       bool,
       LongDecimal<P1, S1>,
       LongDecimal<P1, S1>,
       LongDecimal<P1, S1>>({prefix + "between"});
+#endif
   registerFunction<
       BetweenFunction,
       bool,

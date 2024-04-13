@@ -17,6 +17,7 @@
 #include <string>
 
 #include "velox/functions/Registerer.h"
+#include "velox/functions/lib/Repeat.h"
 #include "velox/functions/prestosql/ArrayConstructor.h"
 #include "velox/functions/prestosql/ArrayFunctions.h"
 #include "velox/functions/prestosql/ArraySort.h"
@@ -109,6 +110,7 @@ inline void registerArrayRemoveFunctions(const std::string& prefix) {
 void registerInternalArrayFunctions() {
   VELOX_REGISTER_VECTOR_FUNCTION(
       udf_$internal$canonicalize, "$internal$canonicalize");
+  VELOX_REGISTER_VECTOR_FUNCTION(udf_$internal$contains, "$internal$contains");
 }
 
 void registerArrayFunctions(const std::string& prefix) {
@@ -144,7 +146,8 @@ void registerArrayFunctions(const std::string& prefix) {
   });
 
   VELOX_REGISTER_VECTOR_FUNCTION(udf_array_sum, prefix + "array_sum");
-  VELOX_REGISTER_VECTOR_FUNCTION(udf_repeat, prefix + "repeat");
+  exec::registerStatefulVectorFunction(
+      prefix + "repeat", repeatSignatures(), makeRepeat, repeatMetadata());
   VELOX_REGISTER_VECTOR_FUNCTION(udf_sequence, prefix + "sequence");
 
   exec::registerStatefulVectorFunction(
@@ -156,7 +159,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayMinMaxFunctions<int16_t>(prefix);
   registerArrayMinMaxFunctions<int32_t>(prefix);
   registerArrayMinMaxFunctions<int64_t>(prefix);
+  #ifdef FOLLY_HAVE_INT128_T
   registerArrayMinMaxFunctions<int128_t>(prefix);
+  #endif
   registerArrayMinMaxFunctions<float>(prefix);
   registerArrayMinMaxFunctions<double>(prefix);
   registerArrayMinMaxFunctions<bool>(prefix);
@@ -169,7 +174,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayJoinFunctions<int16_t>(prefix);
   registerArrayJoinFunctions<int32_t>(prefix);
   registerArrayJoinFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayJoinFunctions<int128_t>(prefix);
+#endif
   registerArrayJoinFunctions<float>(prefix);
   registerArrayJoinFunctions<double>(prefix);
   registerArrayJoinFunctions<bool>(prefix);
@@ -192,7 +199,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayRemoveFunctions<int16_t>(prefix);
   registerArrayRemoveFunctions<int32_t>(prefix);
   registerArrayRemoveFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayRemoveFunctions<int128_t>(prefix);
+#endif
   registerArrayRemoveFunctions<float>(prefix);
   registerArrayRemoveFunctions<double>(prefix);
   registerArrayRemoveFunctions<bool>(prefix);
@@ -210,7 +219,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayTrimFunctions<int16_t>(prefix);
   registerArrayTrimFunctions<int32_t>(prefix);
   registerArrayTrimFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayTrimFunctions<int128_t>(prefix);
+#endif
   registerArrayTrimFunctions<float>(prefix);
   registerArrayTrimFunctions<double>(prefix);
   registerArrayTrimFunctions<bool>(prefix);
@@ -228,7 +239,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayRemoveNullFunctions<int16_t>(prefix);
   registerArrayRemoveNullFunctions<int32_t>(prefix);
   registerArrayRemoveNullFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayRemoveNullFunctions<int128_t>(prefix);
+#endif
   registerArrayRemoveNullFunctions<float>(prefix);
   registerArrayRemoveNullFunctions<double>(prefix);
   registerArrayRemoveNullFunctions<bool>(prefix);
@@ -245,7 +258,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayUnionFunctions<int16_t>(prefix);
   registerArrayUnionFunctions<int32_t>(prefix);
   registerArrayUnionFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayUnionFunctions<int128_t>(prefix);
+#endif
   registerArrayUnionFunctions<float>(prefix);
   registerArrayUnionFunctions<double>(prefix);
   registerArrayUnionFunctions<bool>(prefix);
@@ -258,7 +273,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayCombinationsFunctions<int16_t>(prefix);
   registerArrayCombinationsFunctions<int32_t>(prefix);
   registerArrayCombinationsFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayCombinationsFunctions<int128_t>(prefix);
+#endif
   registerArrayCombinationsFunctions<float>(prefix);
   registerArrayCombinationsFunctions<double>(prefix);
   registerArrayCombinationsFunctions<bool>(prefix);
@@ -270,7 +287,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayHasDuplicatesFunctions<int16_t>(prefix);
   registerArrayHasDuplicatesFunctions<int32_t>(prefix);
   registerArrayHasDuplicatesFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayHasDuplicatesFunctions<int128_t>(prefix);
+#endif
   registerArrayHasDuplicatesFunctions<Varchar>(prefix);
 
   registerArrayFrequencyFunctions<bool>(prefix);
@@ -278,7 +297,9 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayFrequencyFunctions<int16_t>(prefix);
   registerArrayFrequencyFunctions<int32_t>(prefix);
   registerArrayFrequencyFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayFrequencyFunctions<int128_t>(prefix);
+#endif
   registerArrayFrequencyFunctions<float>(prefix);
   registerArrayFrequencyFunctions<double>(prefix);
   registerArrayFrequencyFunctions<Timestamp>(prefix);
@@ -288,4 +309,4 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayNormalizeFunctions<float>(prefix);
   registerArrayNormalizeFunctions<double>(prefix);
 }
-}; // namespace facebook::velox::functions
+} // namespace facebook::velox::functions

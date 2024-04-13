@@ -42,6 +42,9 @@ class S3FileSystemTest : public S3Test {
 } // namespace
 
 TEST_F(S3FileSystemTest, writeAndRead) {
+  /// The hive config used for Minio defaults to turning
+  /// off using proxy settings if the environment provides them.
+  setenv("HTTP_PROXY", "http://test:test@127.0.0.1:8888", 1);
   const char* bucketName = "data";
   const char* file = "test.txt";
   const std::string filename = localPath(bucketName) + "/" + file;
@@ -187,7 +190,8 @@ TEST_F(S3FileSystemTest, writeFileAndRead) {
   auto hiveConfig = minioServer_->hiveConfig();
   filesystems::S3FileSystem s3fs(hiveConfig);
   auto pool = memory::memoryManager()->addLeafPool("S3FileSystemTest");
-  auto writeFile = s3fs.openFileForWrite(s3File, {{}, pool.get()});
+  auto writeFile =
+      s3fs.openFileForWrite(s3File, {{}, pool.get(), std::nullopt});
   auto s3WriteFile = dynamic_cast<filesystems::S3WriteFile*>(writeFile.get());
   std::string dataContent =
       "Dance me to your beauty with a burning violin"

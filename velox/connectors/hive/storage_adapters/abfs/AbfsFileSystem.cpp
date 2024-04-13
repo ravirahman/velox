@@ -13,20 +13,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "velox/connectors/hive/storage_adapters/abfs/AbfsFileSystem.h"
-#include "velox/common/file/File.h"
-#include "velox/connectors/hive/HiveConfig.h"
-#include "velox/connectors/hive/storage_adapters/abfs/AbfsReadFile.h"
-#include "velox/connectors/hive/storage_adapters/abfs/AbfsUtil.h"
-#include "velox/core/Config.h"
 
 #include <azure/storage/blobs/blob_client.hpp>
 #include <fmt/format.h>
 #include <folly/executors/IOThreadPoolExecutor.h>
 #include <glog/logging.h>
 
+#include "velox/common/file/File.h"
+#include "velox/connectors/hive/HiveConfig.h"
+#include "velox/connectors/hive/storage_adapters/abfs/AbfsReadFile.h"
+#include "velox/connectors/hive/storage_adapters/abfs/AbfsWriteFile.h"
+#include "velox/core/Config.h"
+
 namespace facebook::velox::filesystems::abfs {
 using namespace Azure::Storage::Blobs;
+
 class AbfsConfig {
  public:
   AbfsConfig(const Config* config) : config_(config) {}
@@ -41,7 +44,7 @@ class AbfsConfig {
   }
 
  private:
-  const Config* FOLLY_NONNULL config_;
+  const Config* config_;
 };
 
 class AbfsReadFile::Impl {
@@ -49,20 +52,25 @@ class AbfsReadFile::Impl {
   constexpr static uint64_t kReadConcurrency = 8;
 
  public:
-  explicit Impl(const std::string& path, const std::string& connectStr)
-      : path_(path), connectStr_(connectStr) {
-    auto abfsAccount = AbfsAccount(path_);
-    fileSystem_ = abfsAccount.fileSystem();
+  explicit Impl(const std::string& path, const std::string& connectStr) {
+    auto abfsAccount = AbfsAccount(path);
     fileName_ = abfsAccount.filePath();
     fileClient_ =
         std::make_unique<BlobClient>(BlobClient::CreateFromConnectionString(
-            connectStr_, fileSystem_, fileName_));
+            connectStr, abfsAccount.fileSystem(), fileName_));
   }
 
-  void initialize() {
+  void initialize(const FileOptions& options) {
+    if (options.fileSize.has_value()) {
+      VELOX_CHECK_GE(
+          options.fileSize.value(), 0, "File size must be non-negative");
+      length_ = options.fileSize.value();
+    }
+
     if (length_ != -1) {
       return;
     }
+
     try {
       auto properties = fileClient_->GetProperties();
       length_ = properties.Value.BlobSize;
@@ -153,9 +161,6 @@ class AbfsReadFile::Impl {
         reinterpret_cast<uint8_t*>(position), length);
   }
 
-  const std::string path_;
-  const std::string connectStr_;
-  std::string fileSystem_;
   std::string fileName_;
   std::unique_ptr<BlobClient> fileClient_;
 
@@ -168,8 +173,8 @@ AbfsReadFile::AbfsReadFile(
   impl_ = std::make_shared<Impl>(path, connectStr);
 }
 
-void AbfsReadFile::initialize() {
-  return impl_->initialize();
+void AbfsReadFile::initialize(const FileOptions& options) {
+  return impl_->initialize(options);
 }
 
 std::string_view
@@ -244,8 +249,17 @@ std::string AbfsFileSystem::name() const {
 
 std::unique_ptr<ReadFile> AbfsFileSystem::openFileForRead(
     std::string_view path,
-    const FileOptions& /*unused*/) {
+    const FileOptions& options) {
   auto abfsfile = std::make_unique<AbfsReadFile>(
+      std::string(path), impl_->connectionString(std::string(path)));
+  abfsfile->initialize(options);
+  return abfsfile;
+}
+
+std::unique_ptr<WriteFile> AbfsFileSystem::openFileForWrite(
+    std::string_view path,
+    const FileOptions& /*unused*/) {
+  auto abfsfile = std::make_unique<AbfsWriteFile>(
       std::string(path), impl_->connectionString(std::string(path)));
   abfsfile->initialize();
   return abfsfile;

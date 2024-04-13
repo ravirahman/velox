@@ -45,7 +45,9 @@ void registerArrayConcatFunctions(const std::string& prefix) {
   registerArrayConcatFunctions<int16_t>(prefix);
   registerArrayConcatFunctions<int32_t>(prefix);
   registerArrayConcatFunctions<int64_t>(prefix);
+#ifdef FOLLY_HAVE_INT128_T
   registerArrayConcatFunctions<int128_t>(prefix);
+#endif
   registerArrayConcatFunctions<float>(prefix);
   registerArrayConcatFunctions<double>(prefix);
   registerArrayConcatFunctions<bool>(prefix);

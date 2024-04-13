@@ -121,6 +121,18 @@ class BaseHashTable {
   /// Specifies the hash mode of a table.
   enum class HashMode { kHash, kArray, kNormalizedKey };
 
+  static constexpr int8_t kNoSpillInputStartPartitionBit = -1;
+
+  /// The name of the runtime stats collected and reported by operators that use
+  /// the HashTable (HashBuild, HashAggregation).
+  static inline const std::string kCapacity{"hashtable.capacity"};
+  static inline const std::string kNumRehashes{"hashtable.numRehashes"};
+  static inline const std::string kNumDistinct{"hashtable.numDistinct"};
+  static inline const std::string kNumTombstones{"hashtable.numTombstones"};
+
+  /// The same as above but only reported by the HashBuild operator.
+  static inline const std::string kBuildWallNanos{"hashtable.buildWallNanos"};
+
   /// Returns the string of the given 'mode'.
   static std::string modeString(HashMode mode);
 
@@ -132,8 +144,8 @@ class BaseHashTable {
     void reset(const HashLookup& lookup) {
       rows = &lookup.rows;
       hits = &lookup.hits;
-      nextHit = nullptr;
       lastRowIndex = 0;
+      lastDuplicateRowIndex = 0;
     }
 
     bool atEnd() const {
@@ -142,8 +154,8 @@ class BaseHashTable {
 
     const raw_vector<vector_size_t>* rows{nullptr};
     const raw_vector<char*>* hits{nullptr};
-    char* nextHit{nullptr};
     vector_size_t lastRowIndex{0};
+    vector_size_t lastDuplicateRowIndex{0};
   };
 
   struct RowsIterator {
@@ -153,11 +165,14 @@ class BaseHashTable {
     void reset() {
       *this = {};
     }
+
+    std::string toString() const;
   };
 
   struct NullKeyRowsIterator {
     bool initialized = false;
     char* nextHit;
+    vector_size_t lastDuplicateRowIndex{0};
   };
 
   /// Takes ownership of 'hashers'. These are used to keep key-level
@@ -181,7 +196,8 @@ class BaseHashTable {
       HashLookup& lookup,
       const RowVectorPtr& input,
       SelectivityVector& rows,
-      bool ignoreNullKeys);
+      bool ignoreNullKeys,
+      int8_t spillInputStartPartitionBit);
 
   /// Finds or creates a group for each key in 'lookup'. The keys are
   /// returned in 'lookup.hits'.
@@ -208,7 +224,7 @@ class BaseHashTable {
 
   /// Fills 'hits' with consecutive hash join results. The corresponding element
   /// of 'inputRows' is set to the corresponding row number in probe keys.
-  /// Returns the number of hits produced. If this s less than hits.size() then
+  /// Returns the number of hits produced. If this is less than hits.size() then
   /// all the hits have been produced.
   /// Adds input rows without a match to 'inputRows' with corresponding hit
   /// set to nullptr if 'includeMisses' is true. Otherwise, skips input rows
@@ -248,15 +264,16 @@ class BaseHashTable {
 
   virtual void prepareJoinTable(
       std::vector<std::unique_ptr<BaseHashTable>> tables,
-      folly::Executor* executor = nullptr) = 0;
+      folly::Executor* executor = nullptr,
+      int8_t spillInputStartPartitionBit = kNoSpillInputStartPartitionBit) = 0;
 
   /// Returns the memory footprint in bytes for any data structures
   /// owned by 'this'.
   virtual int64_t allocatedBytes() const = 0;
 
-  /// Deletes any content of 'this' but does not free the memory. Can
-  /// be used for flushing a partial group by, for example.
-  virtual void clear() = 0;
+  /// Deletes any content of 'this'. If 'freeTable' is false, then hash table is
+  /// not freed which can be used for flushing a partial group by, for example.
+  virtual void clear(bool freeTable = false) = 0;
 
   /// Returns the capacity of the internal hash table which is number of rows
   /// it can stores in a group by or hash join build.
@@ -308,7 +325,7 @@ class BaseHashTable {
       int32_t numNew,
       bool disableRangeArrayHash = false) = 0;
 
-  // Removes 'rows'  from the hash table and its RowContainer. 'rows' must exist
+  // Removes 'rows' from the hash table and its RowContainer. 'rows' must exist
   // and be unique.
   virtual void erase(folly::Range<char**> rows) = 0;
 
@@ -323,12 +340,21 @@ class BaseHashTable {
     return rows_.get();
   }
 
-  // Static functions for processing internals. Public because used in
-  // structs that define probe and insert algorithms.
+  /// Returns all the row containers of a composed hash table such as for hash
+  /// join use.
+  virtual std::vector<RowContainer*> allRows() const = 0;
+
+  /// Static functions for processing internals. Public because used in
+  /// structs that define probe and insert algorithms.
 
   /// Extracts a 7 bit tag from a hash number. The high bit is always set.
   static uint8_t hashTag(uint64_t hash) {
-    return static_cast<uint8_t>(hash >> 32) | 0x80;
+    // This is likely all 0 for small key types (<= 32 bits).  Not an issue
+    // because small types have a range that makes them normalized key cases.
+    // If there are multiple small type keys, they are mixed which makes them a
+    // 64 bit hash.  Normalized keys are mixed before being used as hash
+    // numbers.
+    return static_cast<uint8_t>(hash >> 38) | 0x80;
   }
 
   /// Loads a vector of tags for bulk comparison. Disables tsan errors
@@ -364,6 +390,20 @@ class BaseHashTable {
   }
 
   virtual void setHashMode(HashMode mode, int32_t numNew) = 0;
+
+  virtual int sizeBits() const = 0;
+
+  // We don't want any overlap in the bit ranges used by bucket index and those
+  // used by spill partitioning; otherwise because we receive data from only one
+  // partition, the overlapped bits would be the same and only a fraction of the
+  // buckets would be used.  This would cause the insertion taking very long
+  // time and block driver threads.
+  void checkHashBitsOverlap(int8_t spillInputStartPartitionBit) {
+    if (spillInputStartPartitionBit != kNoSpillInputStartPartitionBit &&
+        hashMode() != HashMode::kArray) {
+      VELOX_CHECK_LE(sizeBits(), spillInputStartPartitionBit);
+    }
+  }
 
   std::vector<std::unique_ptr<VectorHasher>> hashers_;
   std::unique_ptr<RowContainer> rows_;
@@ -405,6 +445,15 @@ class HashTable : public BaseHashTable {
       uint32_t minTableSizeForParallelJoinBuild,
       memory::MemoryPool* pool,
       const std::shared_ptr<velox::HashStringAllocator>& stringArena = nullptr);
+
+  ~HashTable() override {
+    if (otherTables_.size() > 0) {
+      rows_->clearNextRowVectors();
+      for (auto i = 0; i < otherTables_.size(); ++i) {
+        otherTables_[i]->rows()->clearNextRowVectors();
+      }
+    }
+  }
 
   static std::unique_ptr<HashTable> createForAggregation(
       std::vector<std::unique_ptr<VectorHasher>>&& hashers,
@@ -475,7 +524,7 @@ class HashTable : public BaseHashTable {
       int32_t maxRows,
       char** rows) override;
 
-  void clear() override;
+  void clear(bool freeTable = false) override;
 
   int64_t allocatedBytes() const override {
     // For each row: sizeof(char*) per table entry + memory
@@ -525,7 +574,9 @@ class HashTable : public BaseHashTable {
   // and VectorHashers and decides the hash mode and representation.
   void prepareJoinTable(
       std::vector<std::unique_ptr<BaseHashTable>> tables,
-      folly::Executor* executor = nullptr) override;
+      folly::Executor* executor = nullptr,
+      int8_t spillInputStartPartitionBit =
+          kNoSpillInputStartPartitionBit) override;
 
   uint64_t hashTableSizeIncrease(int32_t numNewDistinct) const override {
     if (numDistinct_ + numNewDistinct > rehashSize()) {
@@ -551,6 +602,8 @@ class HashTable : public BaseHashTable {
   uint64_t rehashSize() const {
     return rehashSize(capacity_ - numTombstones_);
   }
+
+  std::vector<RowContainer*> allRows() const override;
 
   std::string toString() override;
 
@@ -587,10 +640,6 @@ class HashTable : public BaseHashTable {
   // occupy exactly two (64 bytes) cache lines.
   class Bucket {
    public:
-    Bucket() {
-      static_assert(sizeof(Bucket) == 128);
-    }
-
     uint8_t tagAt(int32_t slotIndex) {
       return reinterpret_cast<uint8_t*>(&tags_)[slotIndex];
     }
@@ -622,6 +671,7 @@ class HashTable : public BaseHashTable {
     char padding_[16];
   };
 
+  static_assert(sizeof(Bucket) == 128);
   static constexpr uint64_t kBucketSize = sizeof(Bucket);
 
   // Returns the bucket at byte offset 'offset' from 'table_'.
@@ -653,10 +703,6 @@ class HashTable : public BaseHashTable {
   template <RowContainer::ProbeType probeType>
   int32_t
   listRows(RowsIterator* iter, int32_t maxRows, uint64_t maxBytes, char** rows);
-
-  char*& nextRow(char* row) {
-    return *reinterpret_cast<char**>(row + nextOffset_);
-  }
 
   void arrayGroupProbe(HashLookup& lookup);
 
@@ -720,6 +766,7 @@ class HashTable : public BaseHashTable {
   /// can't be inserted within this range, it is not inserted but rather added
   /// to the end of 'overflows' in 'partitionInfo'.
   void insertForJoin(
+      RowContainer* rows,
       char** groups,
       uint64_t* hashes,
       int32_t numGroups,
@@ -801,12 +848,15 @@ class HashTable : public BaseHashTable {
 
   // Adds a row to a hash join build side entry with multiple rows
   // with the same key.
-  void pushNext(char* row, char* next);
+  // 'rows' should be the same as the one in hash table except for
+  // 'parallelJoinBuild'.
+  void pushNext(RowContainer* rows, char* row, char* next);
 
   // Finishes inserting an entry into a join hash table. If 'partitionInfo' is
   // not null and the insert falls out-side of the partition range, then insert
   // is not made but row is instead added to 'overflow' in 'partitionInfo'
   void buildFullProbe(
+      RowContainer* rows,
       ProbeState& state,
       uint64_t hash,
       char* row,
@@ -881,6 +931,10 @@ class HashTable : public BaseHashTable {
     }
   }
 
+  int sizeBits() const final {
+    return sizeBits_;
+  }
+
   // The min table size in row to trigger parallel join table build.
   const uint32_t minTableSizeForParallelJoinBuild_;
 
@@ -938,7 +992,7 @@ class HashTable : public BaseHashTable {
 
   // Executor for parallelizing hash join build. This may be the
   // executor for Drivers. If this executor is indefinitely taken by
-  // other work, the thread of prepareJoinTables() will sequentially
+  // other work, the thread of prepareJoinTable() will sequentially
   // execute the parallel build steps.
   folly::Executor* buildExecutor_{nullptr};
 

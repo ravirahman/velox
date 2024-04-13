@@ -7,21 +7,27 @@ supports only a subset of PCRE syntax and in particular does not support
 backtracking and associated features (e.g. back references).
 See https://github.com/google/re2/wiki/Syntax for more information.
 
+Compiling regular expressions is CPU intensive. Hence, each function is
+limited to 20 different expressions per instance and thread of execution.
+
 .. function:: like(string, pattern) -> boolean
               like(string, pattern, escape) -> boolean
 
     Evaluates if the ``string`` matches the ``pattern``. Patterns can contain
     regular characters as well as wildcards. Wildcard characters can be escaped
-    using the single character specified for the ``escape`` parameter.
-    Matching is case sensitive.
+    using the single character specified for the ``escape`` parameter. Only ASCII
+    characters are supported for the ``escape`` parameter. Matching is case sensitive.
 
     Note: The wildcard '%' represents 0, 1 or multiple characters and the
     wildcard '_' represents exactly one character.
 
     Note: Each function instance allow for a maximum of 20 regular expressions to
-    be compiled throughout the lifetime of the query. Not all Patterns requires
-    compilation of regular expressions; for example a pattern 'aa' does not.
-    Only those that require the compilation of regular expressions are counted.
+    be compiled per thread of execution. Not all patterns require
+    compilation of regular expressions. Patterns 'hello', 'hello%', '_hello__%',
+    '%hello', '%__hello_', '%hello%', where 'hello', 'velox'
+    contains only regular characters and '_' wildcards are evaluated without
+    using regular expressions. Only those patterns that require the compilation of
+    regular expressions are counted towards the limit.
 
         SELECT like('abc', '%b%'); -- true
         SELECT like('a_c', '%#_%', '#'); -- true

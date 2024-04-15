@@ -242,21 +242,20 @@ template <template <class> typename Func>
 void registerDecimalBinary(
     const std::string& name,
     const std::vector<exec::SignatureVariable>& constraints) {
-#ifdef FOLLY_HAVE_INT128_T
   // (long, long) -> long
   registerFunction<
       Func,
       LongDecimal<P3, S3>,
       LongDecimal<P1, S1>,
       LongDecimal<P2, S2>>({name}, constraints);
-#endif
+
   // (short, short) -> short
   registerFunction<
       Func,
       ShortDecimal<P3, S3>,
       ShortDecimal<P1, S1>,
       ShortDecimal<P2, S2>>({name}, constraints);
-#ifdef FOLLY_HAVE_INT128_T
+
   // (short, short) -> long
   registerFunction<
       Func,
@@ -277,7 +276,6 @@ void registerDecimalBinary(
       LongDecimal<P3, S3>,
       LongDecimal<P1, S1>,
       ShortDecimal<P2, S2>>({name}, constraints);
-#endif
 }
 
 template <template <class> typename Func>
@@ -358,7 +356,6 @@ void registerDecimalDivide(const std::string& prefix) {
 
   registerDecimalBinary<DecimalDivideFunction>(prefix + "divide", constraints);
 
-  #ifdef FOLLY_HAVE_INT128_T
   // (short, long) -> short
   registerFunction<
       DecimalDivideFunction,
@@ -372,7 +369,6 @@ void registerDecimalDivide(const std::string& prefix) {
       ShortDecimal<P3, S3>,
       LongDecimal<P1, S1>,
       ShortDecimal<P2, S2>>({prefix + "divide"}, constraints);
-#endif
 }
 
 void registerDecimalFloor(const std::string& prefix) {
@@ -387,7 +383,7 @@ void registerDecimalFloor(const std::string& prefix) {
       exec::SignatureVariable(
           S2::name(), "0", exec::ParameterType::kIntegerParameter),
   };
-#ifdef FOLLY_HAVE_INT128_T
+
   registerFunction<
       DecimalFloorFunction,
       LongDecimal<P2, S2>,
@@ -397,7 +393,7 @@ void registerDecimalFloor(const std::string& prefix) {
       DecimalFloorFunction,
       ShortDecimal<P2, S2>,
       LongDecimal<P1, S1>>({prefix + "floor"}, constraints);
-#endif
+
   registerFunction<
       DecimalFloorFunction,
       ShortDecimal<P2, S2>,
@@ -418,7 +414,7 @@ void registerDecimalRound(const std::string& prefix) {
         exec::SignatureVariable(
             S2::name(), "0", exec::ParameterType::kIntegerParameter),
     };
-#ifdef FOLLY_HAVE_INT128_T
+
     registerFunction<
         DecimalRoundFunction,
         LongDecimal<P2, S2>,
@@ -428,7 +424,7 @@ void registerDecimalRound(const std::string& prefix) {
         DecimalRoundFunction,
         ShortDecimal<P2, S2>,
         LongDecimal<P1, S1>>({prefix + "round"}, constraints);
-#endif
+
     registerFunction<
         DecimalRoundFunction,
         ShortDecimal<P2, S2>,
@@ -443,26 +439,24 @@ void registerDecimalRound(const std::string& prefix) {
             fmt::format("min(38, {p} + 1)", fmt::arg("p", P1::name())),
             exec::ParameterType::kIntegerParameter),
     };
-#ifdef FOLLY_HAVE_INT128_T
+
     registerFunction<
         DecimalRoundFunction,
         LongDecimal<P2, S1>,
         LongDecimal<P1, S1>,
         int32_t>({prefix + "round"}, constraints);
-#endif
+
     registerFunction<
         DecimalRoundFunction,
         ShortDecimal<P2, S1>,
         ShortDecimal<P1, S1>,
         int32_t>({prefix + "round"}, constraints);
 
-#ifdef FOLLY_HAVE_INT128_T
     registerFunction<
         DecimalRoundFunction,
         LongDecimal<P2, S1>,
         ShortDecimal<P1, S1>,
         int32_t>({prefix + "round"}, constraints);
-#endif
   }
 }
 

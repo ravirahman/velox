@@ -1374,15 +1374,6 @@ template <typename Class>
 std::shared_ptr<const OpaqueType> OPAQUE() {
   return OpaqueType::create<Class>();
 }
-#ifdef FOLLY_HAVE_INT128_T
-  #define VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH_HUGEINT_CASE             \
-   case ::facebook::velox::TypeKind::HUGEINT: {                       \
-          return TEMPLATE_FUNC<::facebook::velox::TypeKind::HUGEINT>( \
-              __VA_ARGS__);                                           \
-        }
-#else
-  #define VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH_HUGEINT_CASE
-#endif
 
 #define VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(TEMPLATE_FUNC, typeKind, ...)      \
   [&]() {                                                                     \
@@ -1407,7 +1398,10 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
         return TEMPLATE_FUNC<::facebook::velox::TypeKind::BIGINT>(            \
             __VA_ARGS__);                                                     \
       }                                                                       \
-      VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH_HUGEINT_CASE                         \
+      case ::facebook::velox::TypeKind::HUGEINT: {                            \
+        return TEMPLATE_FUNC<::facebook::velox::TypeKind::HUGEINT>(           \
+            __VA_ARGS__);                                                     \
+      }                                                                       \
       case ::facebook::velox::TypeKind::REAL: {                               \
         return TEMPLATE_FUNC<::facebook::velox::TypeKind::REAL>(__VA_ARGS__); \
       }                                                                       \
@@ -1433,17 +1427,6 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
     }                                                                         \
   }()
 
-
-#ifdef FOLLY_HAVE_INT128_T
-  #define VELOX_DYNAMIC_SCALAR_TEMPLATE_TYPE_DISPATCH_HUGEINT_CASE      \
-   case ::facebook::velox::TypeKind::HUGEINT: {                         \
-        return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::HUGEINT>(  \
-            __VA_ARGS__);                                               \
-      }   
-#else
-  #define VELOX_DYNAMIC_SCALAR_TEMPLATE_TYPE_DISPATCH_HUGEINT_CASE
-#endif
-
 #define VELOX_DYNAMIC_SCALAR_TEMPLATE_TYPE_DISPATCH(                     \
     TEMPLATE_FUNC, T, typeKind, ...)                                     \
   [&]() {                                                                \
@@ -1468,7 +1451,10 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
         return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::BIGINT>(    \
             __VA_ARGS__);                                                \
       }                                                                  \
-      VELOX_DYNAMIC_SCALAR_TEMPLATE_TYPE_DISPATCH_HUGEINT_CASE           \
+      case ::facebook::velox::TypeKind::HUGEINT: {                       \
+        return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::HUGEINT>(   \
+            __VA_ARGS__);                                                \
+      }                                                                  \
       case ::facebook::velox::TypeKind::REAL: {                          \
         return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::REAL>(      \
             __VA_ARGS__);                                                \
@@ -1507,16 +1493,6 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
     }                                                                          \
   }()
 
-#ifdef FOLLY_HAVE_INT128_T
-  #define VELOX_DYNAMIC_TYPE_DISPATCH_IMPL_HUGEINT_CASE                        \
-    case ::facebook::velox::TypeKind::HUGEINT: {                               \
-        return PREFIX<::facebook::velox::TypeKind::HUGEINT> SUFFIX(            \
-            __VA_ARGS__);                                                      \
-      }
-#else
-  #define VELOX_DYNAMIC_TYPE_DISPATCH_IMPL_HUGEINT_CASE
-#endif
-
 #define VELOX_DYNAMIC_TYPE_DISPATCH_IMPL(PREFIX, SUFFIX, typeKind, ...)        \
   [&]() {                                                                      \
     switch (typeKind) {                                                        \
@@ -1540,7 +1516,10 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
         return PREFIX<::facebook::velox::TypeKind::BIGINT> SUFFIX(             \
             __VA_ARGS__);                                                      \
       }                                                                        \
-      VELOX_DYNAMIC_TYPE_DISPATCH_IMPL_HUGEINT_CASE                            \
+      case ::facebook::velox::TypeKind::HUGEINT: {                             \
+        return PREFIX<::facebook::velox::TypeKind::HUGEINT> SUFFIX(            \
+            __VA_ARGS__);                                                      \
+      }                                                                        \
       case ::facebook::velox::TypeKind::REAL: {                                \
         return PREFIX<::facebook::velox::TypeKind::REAL> SUFFIX(__VA_ARGS__);  \
       }                                                                        \
@@ -1612,16 +1591,6 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
 #define VELOX_SCALAR_ACCESSOR(KIND) \
   std::shared_ptr<const ScalarType<TypeKind::KIND>> KIND()
 
-
-#ifdef FOLLY_HAVE_INT128_T
-  #define VELOX_STATIC_FIELD_DYNAMIC_DISPATCH_HUGEINT_CASE         \
-   case ::facebook::velox::TypeKind::HUGEINT: {                    \
-        return CLASS<::facebook::velox::TypeKind::HUGEINT>::FIELD; \
-      }  
-#else
-  #define VELOX_STATIC_FIELD_DYNAMIC_DISPATCH_HUGEINT_CASE
-#endif
-
 #define VELOX_STATIC_FIELD_DYNAMIC_DISPATCH(CLASS, FIELD, typeKind)           \
   [&]() {                                                                     \
     switch (typeKind) {                                                       \
@@ -1640,7 +1609,6 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
       case ::facebook::velox::TypeKind::BIGINT: {                             \
         return CLASS<::facebook::velox::TypeKind::BIGINT>::FIELD;             \
       }                                                                       \
-      VELOX_STATIC_FIELD_DYNAMIC_DISPATCH_HUGEINT_CASE                        \
       case ::facebook::velox::TypeKind::REAL: {                               \
         return CLASS<::facebook::velox::TypeKind::REAL>::FIELD;               \
       }                                                                       \
@@ -1676,6 +1644,8 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
       return CLASS<::facebook::velox::TypeKind::UNKNOWN>::FIELD;          \
     } else if ((typeKind) == ::facebook::velox::TypeKind::OPAQUE) {       \
       return CLASS<::facebook::velox::TypeKind::OPAQUE>::FIELD;           \
+    } else if ((typeKind) == ::facebook::velox::TypeKind::HUGEINT) {      \
+      return CLASS<::facebook::velox::TypeKind::HUGEINT>::FIELD;          \
     } else {                                                              \
       return VELOX_STATIC_FIELD_DYNAMIC_DISPATCH(CLASS, FIELD, typeKind); \
     }                                                                     \
@@ -1812,12 +1782,10 @@ inline std::string to(const Timestamp& value) {
   return value.toString();
 }
 
-#ifdef FOLLY_HAVE_INT128_T
 template <>
 inline std::string to(const int128_t& value) {
   return std::to_string(value);
 }
-#endif
 
 template <>
 inline std::string to(const velox::StringView& value) {

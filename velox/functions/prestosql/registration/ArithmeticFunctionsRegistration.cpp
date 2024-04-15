@@ -63,22 +63,18 @@ void registerSimpleFunctions(const std::string& prefix) {
   registerUnaryNumeric<FloorFunction>({prefix + "floor"});
 
   registerUnaryNumeric<AbsFunction>({prefix + "abs"});
-#ifdef FOLLY_HAVE_INT128_T
   registerFunction<
       DecimalAbsFunction,
       LongDecimal<P1, S1>,
       LongDecimal<P1, S1>>({prefix + "abs"});
-#endif
   registerFunction<
       DecimalAbsFunction,
       ShortDecimal<P1, S1>,
       ShortDecimal<P1, S1>>({prefix + "abs"});
 
   registerUnaryFloatingPoint<NegateFunction>({prefix + "negate"});
-#ifdef FOLLY_HAVE_INT128_T
   registerFunction<NegateFunction, LongDecimal<P1, S1>, LongDecimal<P1, S1>>(
       {prefix + "negate"});
-#endif
   registerFunction<NegateFunction, ShortDecimal<P1, S1>, ShortDecimal<P1, S1>>(
       {prefix + "negate"});
 

@@ -81,6 +81,12 @@ set(VELOX_DEPENDENCY_SOURCE
       STRING
       "Default source for all dependencies with source builds enabled: AUTO SYSTEM BUNDLED."
 )
+set(VELOX_GFLAGS_TYPE
+    "shared"
+    CACHE
+      STRING
+      "Specify whether to find the gflags package as a shared or static package"
+)
 option(VELOX_ENABLE_EXEC "Build exec." ON)
 option(VELOX_ENABLE_AGGREGATES "Build aggregates." ON)
 option(VELOX_ENABLE_HIVE_CONNECTOR "Build Hive connector." ON)
@@ -362,7 +368,7 @@ if(${VELOX_ENABLE_GPU})
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-find_package(Boost 1.66.0 COMPONENTS
+find_package(Boost 1.77.0 COMPONENTS
 atomic
 context
 date_time

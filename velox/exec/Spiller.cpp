@@ -297,7 +297,7 @@ namespace {
 // spilled when starting to produce output. This is only used for
 // sorted spills since for hash join spilling we just use the data in
 // the RowContainer as is.
-class RowContainerSpillMergeStream : public SpillMergeStream {
+class RowContainerSpillMergeStream final : public SpillMergeStream {
  public:
   RowContainerSpillMergeStream(
       int32_t numSortKeys,

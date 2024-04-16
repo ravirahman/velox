@@ -47,7 +47,7 @@ using ClassPageCount = int32_t;
 /// mmap of the requested size (ContiguousAllocation). Small contiguous memory
 /// allocations less than 3/4 of smallest size class are still delegated to
 /// malloc.
-class MmapAllocator : public MemoryAllocator {
+class MmapAllocator final : public MemoryAllocator {
  public:
   struct Options {
     ///  Capacity in bytes, default unlimited.

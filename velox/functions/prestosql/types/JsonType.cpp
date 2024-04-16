@@ -1047,7 +1047,7 @@ bool isSupportedBasicType(const TypePtr& type) {
 }
 
 /// Custom operator for casts from and to Json type.
-class JsonCastOperator : public exec::CastOperator {
+class JsonCastOperator final : public exec::CastOperator {
  public:
   bool isSupportedFromType(const TypePtr& other) const override;
 

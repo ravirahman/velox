@@ -39,7 +39,7 @@ namespace facebook::velox {
 /// immediately below is free. In this case the uint32_t below the header has
 /// the size of the previous free block. The last word of a Allocation::PageRun
 /// backing a HashStringAllocator is set to kArenaEnd.
-class HashStringAllocator : public StreamArena {
+class HashStringAllocator final : public StreamArena {
  public:
   /// The minimum allocation must have space after the header for the free list
   /// pointers and the trailing length.

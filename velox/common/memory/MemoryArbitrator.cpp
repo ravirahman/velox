@@ -76,7 +76,7 @@ FactoryRegistry& arbitratorFactories() {
 //
 // TODO: deprecate this legacy policy with kShared policy for Prestissimo
 // later.
-class NoopArbitrator : public MemoryArbitrator {
+class NoopArbitrator final : public MemoryArbitrator {
  public:
   explicit NoopArbitrator(const Config& config) : MemoryArbitrator(config) {
     VELOX_CHECK(config.kind.empty());

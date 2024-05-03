@@ -18,9 +18,11 @@ find_path(LZ4_INCLUDE_DIR lz4.h PATHS ${LZ4_INCLUDEDIR})
 select_library_configurations(LZ4)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(LZ4_LIBRARIES "${LZ4_LIBRARY_RELEASE}")
+  set(LZ4_LIBRARIES "${LZ4_LIBRARY_RELEASE}")
+  set(LZ4_LIBRARY "${LZ4_LIBRARY_RELEASE}")
 else ()
-    set(LZ4_LIBRARIES "${LZ4_LIBRARY_DEBUG}")
+  set(LZ4_LIBRARIES "${LZ4_LIBRARY_DEBUG}")
+  set(LZ4_LIBRARY "${LZ4_LIBRARY_DEBUG}")
 endif ()
 
 find_package_handle_standard_args(lz4 DEFAULT_MSG LZ4_LIBRARY LZ4_INCLUDE_DIR)
@@ -31,8 +33,8 @@ set(liblz4_type STATIC)
 if(NOT TARGET lz4::lz4)
   add_library(lz4::lz4 ${liblz4_type} IMPORTED)
   set_target_properties(lz4::lz4 PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
-                                            "${LZ4_INCLUDE_DIR}")
+          "${LZ4_INCLUDE_DIR}")
   set_target_properties(
-    lz4::lz4 PROPERTIES IMPORTED_LINK_INTERFACE_LANGUAGES "C"
-                        IMPORTED_LOCATION "${LZ4_LIBRARIES}")
+          lz4::lz4 PROPERTIES IMPORTED_LINK_INTERFACE_LANGUAGES "C"
+          IMPORTED_LOCATION "${LZ4_LIBRARIES}")
 endif()

@@ -17,12 +17,12 @@ find_path(LZ4_INCLUDE_DIR lz4.h PATHS ${LZ4_INCLUDEDIR})
 
 select_library_configurations(LZ4)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-  set(LZ4_LIBRARIES "${LZ4_LIBRARY_RELEASE}")
-  set(LZ4_LIBRARY "${LZ4_LIBRARY_RELEASE}")
-else ()
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(LZ4_LIBRARIES "${LZ4_LIBRARY_DEBUG}")
   set(LZ4_LIBRARY "${LZ4_LIBRARY_DEBUG}")
+else ()
+  set(LZ4_LIBRARIES "${LZ4_LIBRARY_RELEASE}")
+  set(LZ4_LIBRARY "${LZ4_LIBRARY_RELEASE}")
 endif ()
 
 find_package_handle_standard_args(lz4 DEFAULT_MSG LZ4_LIBRARY LZ4_INCLUDE_DIR)

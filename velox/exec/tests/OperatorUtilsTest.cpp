@@ -41,12 +41,14 @@ class OperatorUtilsTest : public OperatorTestBase {
     core::PlanFragment planFragment;
     const core::PlanNodeId id{"0"};
     planFragment.planNode = std::make_shared<core::ValuesNode>(id, values);
+    executor_ = std::make_shared<folly::CPUThreadPoolExecutor>(4);
 
     task_ = Task::create(
         "SpillOperatorGroupTest_task",
         std::move(planFragment),
         0,
-        std::make_shared<core::QueryCtx>());
+        std::make_shared<core::QueryCtx>(executor_.get()),
+        Task::ExecutionMode::kParallel);
     driver_ = Driver::testingCreate();
     driverCtx_ = std::make_unique<DriverCtx>(task_, 0, 0, 0, 0);
     driverCtx_->driver = driver_.get();
@@ -131,6 +133,7 @@ class OperatorUtilsTest : public OperatorTestBase {
     }
   }
 
+  std::shared_ptr<folly::CPUThreadPoolExecutor> executor_;
   std::shared_ptr<Task> task_;
   std::shared_ptr<Driver> driver_;
   std::unique_ptr<DriverCtx> driverCtx_;
@@ -460,4 +463,31 @@ TEST_F(OperatorUtilsTest, memStatsFromPool) {
   ASSERT_EQ(stats.peakUserMemoryReservation, 2L << 20);
   ASSERT_EQ(stats.peakSystemMemoryReservation, 0);
   ASSERT_EQ(stats.numMemoryAllocations, 1);
+}
+
+TEST_F(OperatorUtilsTest, dynamicFilterStats) {
+  DynamicFilterStats dynamicFilterStats;
+  ASSERT_TRUE(dynamicFilterStats.empty());
+  const std::string nodeId1{"node1"};
+  const std::string nodeId2{"node2"};
+  dynamicFilterStats.producerNodeIds.emplace(nodeId1);
+  ASSERT_FALSE(dynamicFilterStats.empty());
+  DynamicFilterStats dynamicFilterStatsToMerge;
+  dynamicFilterStatsToMerge.producerNodeIds.emplace(nodeId1);
+  ASSERT_FALSE(dynamicFilterStatsToMerge.empty());
+  dynamicFilterStats.add(dynamicFilterStatsToMerge);
+  ASSERT_EQ(dynamicFilterStats.producerNodeIds.size(), 1);
+  ASSERT_EQ(
+      dynamicFilterStats.producerNodeIds,
+      std::unordered_set<core::PlanNodeId>({nodeId1}));
+
+  dynamicFilterStatsToMerge.producerNodeIds.emplace(nodeId2);
+  dynamicFilterStats.add(dynamicFilterStatsToMerge);
+  ASSERT_EQ(dynamicFilterStats.producerNodeIds.size(), 2);
+  ASSERT_EQ(
+      dynamicFilterStats.producerNodeIds,
+      std::unordered_set<core::PlanNodeId>({nodeId1, nodeId2}));
+
+  dynamicFilterStats.clear();
+  ASSERT_TRUE(dynamicFilterStats.empty());
 }

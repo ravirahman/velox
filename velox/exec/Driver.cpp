@@ -99,6 +99,17 @@ void recordSilentThrows(Operator& op) {
   }
 }
 
+// Check whether the future is set by isBlocked method.
+inline void checkIsBlockFutureValid(
+    const Operator* op,
+    const ContinueFuture& future) {
+  VELOX_CHECK(
+      future.valid(),
+      "The operator {} is blocked but blocking future is not "
+      "set by isBlocked method.",
+      op->operatorType());
+}
+
 } // namespace
 
 DriverCtx::DriverCtx(
@@ -135,7 +146,7 @@ std::optional<common::SpillConfig> DriverCtx::makeSpillConfig(
     return std::nullopt;
   }
   common::GetSpillDirectoryPathCB getSpillDirPathCb =
-      [this]() -> const std::string& {
+      [this]() -> std::string_view {
     return task->getOrCreateSpillDirectory();
   };
   const auto& spillFilePrefix =
@@ -197,7 +208,7 @@ void BlockingState::setResume(std::shared_ptr<BlockingState> state) {
           state->operator_->recordBlockingTime(
               state->sinceMicros_, state->reason_);
         }
-        VELOX_CHECK(!driver->state().isSuspended);
+        VELOX_CHECK(!driver->state().suspended());
         VELOX_CHECK(driver->state().hasBlockingFuture);
         driver->state().hasBlockingFuture = false;
         if (task->pauseRequested()) {
@@ -293,11 +304,12 @@ void Driver::initializeOperators() {
 }
 
 void Driver::pushdownFilters(int operatorIndex) {
-  auto op = operators_[operatorIndex].get();
+  auto* op = operators_[operatorIndex].get();
   const auto& filters = op->getDynamicFilters();
   if (filters.empty()) {
     return;
   }
+  const auto& planNodeId = op->planNodeId();
 
   op->addRuntimeStat("dynamicFiltersProduced", RuntimeCounter(filters.size()));
 
@@ -313,7 +325,7 @@ void Driver::pushdownFilters(int operatorIndex) {
             prevOp->canAddDynamicFilter(),
             "Cannot push down dynamic filters produced by {}",
             op->toString());
-        prevOp->addDynamicFilter(channel, entry.second);
+        prevOp->addDynamicFilter(planNodeId, channel, entry.second);
         prevOp->addRuntimeStat("dynamicFiltersAccepted", RuntimeCounter(1));
         break;
       }
@@ -327,7 +339,7 @@ void Driver::pushdownFilters(int operatorIndex) {
             prevOp->canAddDynamicFilter(),
             "Cannot push down dynamic filters produced by {}",
             op->toString());
-        prevOp->addDynamicFilter(channel, entry.second);
+        prevOp->addDynamicFilter(planNodeId, channel, entry.second);
         prevOp->addRuntimeStat("dynamicFiltersAccepted", RuntimeCounter(1));
         break;
       }
@@ -377,7 +389,7 @@ void Driver::enqueueInternal() {
     auto stopGuard = folly::makeGuard([&]() { opCallStatus_.stop(); });    \
     call;                                                                  \
     recordSilentThrows(*operatorPtr);                                      \
-  } catch (const VeloxException& e) {                                      \
+  } catch (const VeloxException&) {                                        \
     throw;                                                                 \
   } catch (const std::exception& e) {                                      \
     VELOX_FAIL(                                                            \
@@ -522,7 +534,7 @@ StopReason Driver::runInternal(
     TestValue::adjust("facebook::velox::exec::Driver::runInternal", this);
 
     const int32_t numOperators = operators_.size();
-    ContinueFuture future;
+    ContinueFuture future = ContinueFuture::makeEmpty();
 
     for (;;) {
       for (int32_t i = numOperators - 1; i >= 0; --i) {
@@ -550,6 +562,7 @@ StopReason Driver::runInternal(
             curOperatorId_,
             kOpMethodIsBlocked);
         if (blockingReason_ != BlockingReason::kNotBlocked) {
+          checkIsBlockFutureValid(op, future);
           blockingState = std::make_shared<BlockingState>(
               self, std::move(future), op, blockingReason_);
           guard.notThrown();
@@ -565,6 +578,7 @@ StopReason Driver::runInternal(
               curOperatorId_ + 1,
               kOpMethodIsBlocked);
           if (blockingReason_ != BlockingReason::kNotBlocked) {
+            checkIsBlockFutureValid(nextOp, future);
             blockingState = std::make_shared<BlockingState>(
                 self, std::move(future), nextOp, blockingReason_);
             guard.notThrown();
@@ -654,6 +668,7 @@ StopReason Driver::runInternal(
                   curOperatorId_,
                   kOpMethodIsBlocked);
               if (blockingReason_ != BlockingReason::kNotBlocked) {
+                checkIsBlockFutureValid(op, future);
                 blockingState = std::make_shared<BlockingState>(
                     self, std::move(future), op, blockingReason_);
                 guard.notThrown();
@@ -1018,7 +1033,10 @@ SuspendedSection::SuspendedSection(Driver* driver) : driver_(driver) {
 
 SuspendedSection::~SuspendedSection() {
   if (driver_->task()->leaveSuspended(driver_->state()) != StopReason::kNone) {
-    VELOX_FAIL("Terminate detected when leaving suspended section");
+    LOG(WARNING)
+        << "Terminate detected when leaving suspended section for driver "
+        << driver_->driverCtx()->driverId << " from task "
+        << driver_->task()->taskId();
   }
 }
 

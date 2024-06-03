@@ -1112,7 +1112,7 @@ void MemoryPoolImpl::recordAllocDbg(const void* addr, uint64_t size) {
   std::lock_guard<std::mutex> l(debugAllocMutex_);
   debugAllocRecords_.emplace(
       reinterpret_cast<uint64_t>(addr),
-      AllocationRecord{size, process::StackTrace()});
+      AllocationRecord{size, ""}); // process::StackTrace().toString()
 }
 
 void MemoryPoolImpl::recordAllocDbg(const Allocation& allocation) {
@@ -1153,7 +1153,7 @@ void MemoryPoolImpl::recordFreeDbg(const void* addr, uint64_t size) {
         "{}\n",
         size,
         allocRecord.size,
-        allocRecord.callStack.toString(),
+        allocRecord.callStack,
         freeStackTrace));
   }
   debugAllocRecords_.erase(addrUint64);
@@ -1197,12 +1197,12 @@ void MemoryPoolImpl::leakCheckDbg() {
   std::stringbuf buf;
   std::ostream oss(&buf);
   oss << "Detected total of " << debugAllocRecords_.size()
-      << " leaked allocations:\n";
+      << " leaked allocations in pool '" << name() << "':\n";
   for (const auto& itr : debugAllocRecords_) {
     const auto& allocationRecord = itr.second;
     oss << "======== Leaked memory allocation of " << allocationRecord.size
         << " bytes ========\n"
-        << allocationRecord.callStack.toString();
+        << allocationRecord.callStack;
   }
   VELOX_FAIL(buf.str());
 }

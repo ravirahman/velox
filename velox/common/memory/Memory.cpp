@@ -33,8 +33,8 @@ std::mutex& instanceMutex() {
 }
 
 // Must be called while holding a lock over instanceMutex().
-std::unique_ptr<MemoryManager>& instance() {
-  static std::unique_ptr<MemoryManager> kInstance;
+MemoryManager* & instance() {
+  static MemoryManager* kInstance{nullptr};
   return kInstance;
 }
 
@@ -140,9 +140,9 @@ MemoryManager::~MemoryManager() {
 MemoryManager& MemoryManager::deprecatedGetInstance(
     const MemoryManagerOptions& options) {
   std::lock_guard<std::mutex> l(instanceMutex());
-  auto& instanceRef = instance();
+  auto & instanceRef = instance();
   if (instanceRef == nullptr) {
-    instanceRef = std::make_unique<MemoryManager>(options);
+    instanceRef = new MemoryManager(options);
   }
   return *instanceRef;
 }
@@ -155,7 +155,7 @@ void MemoryManager::initialize(const MemoryManagerOptions& options) {
       instanceRef,
       "The memory manager has already been set: {}",
       instanceRef->toString());
-  instanceRef = std::make_unique<MemoryManager>(options);
+  instanceRef = new MemoryManager(options);
 }
 
 // static.
@@ -163,7 +163,7 @@ MemoryManager* MemoryManager::getInstance() {
   std::lock_guard<std::mutex> l(instanceMutex());
   auto& instanceRef = instance();
   VELOX_CHECK_NOT_NULL(instanceRef, "The memory manager is not set");
-  return instanceRef.get();
+  return instanceRef;
 }
 
 // static.
@@ -171,7 +171,7 @@ MemoryManager& MemoryManager::testingSetInstance(
     const MemoryManagerOptions& options) {
   std::lock_guard<std::mutex> l(instanceMutex());
   auto& instanceRef = instance();
-  instanceRef = std::make_unique<MemoryManager>(options);
+  instanceRef = new MemoryManager(options);
   return *instanceRef;
 }
 

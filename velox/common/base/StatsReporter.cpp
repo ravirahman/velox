@@ -23,7 +23,7 @@ BaseStatsReporter* reporter{nullptr};
 
 }
 
-BaseStatsReporter* & get_stats_reporter() {
+BaseStatsReporter* & BaseStatsReporter::get_instance() {
     return reporter;
 }
 

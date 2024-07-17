@@ -18,6 +18,13 @@
 
 namespace facebook::velox {
 
-bool BaseStatsReporter::registered = false;
+namespace {
+BaseStatsReporter* reporter{nullptr};
+
+}
+
+BaseStatsReporter* & get_stats_reporter() {
+    return reporter;
+}
 
 }

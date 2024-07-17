@@ -116,7 +116,7 @@ class BaseStatsReporter {
   virtual void addHistogramMetricValue(folly::StringPiece key, size_t value)
       const = 0;
 
-  static bool registered;
+  static BaseStatsReporter*& get_instance();
 };
 
 // This is a dummy reporter that does nothing
@@ -164,50 +164,34 @@ class DummyStatsReporter : public BaseStatsReporter {
 
 #define DEFINE_METRIC(key, type)                               \
   {                                                            \
-    if (::facebook::velox::BaseStatsReporter::registered) {    \
-      auto reporter = folly::Singleton<                        \
-          facebook::velox::BaseStatsReporter>::try_get_fast(); \
-      if (FOLLY_LIKELY(reporter != nullptr)) {                 \
-        reporter->registerMetricExportType((key), (type));     \
-      }                                                        \
+    if (::facebook::velox::BaseStatsReporter::get_instance()) {    \
+        facebook::velox::BaseStatsReporter::get_instance()->registerMetricExportType((key), (type));     \
     }                                                          \
   }
 
 #define RECORD_METRIC_VALUE(key, ...)                          \
   {                                                            \
-    if (::facebook::velox::BaseStatsReporter::registered) {    \
-      auto reporter = folly::Singleton<                        \
-          facebook::velox::BaseStatsReporter>::try_get_fast(); \
-      if (FOLLY_LIKELY(reporter != nullptr)) {                 \
-        reporter->addMetricValue((key), ##__VA_ARGS__);        \
-      }                                                        \
+    if (::facebook::velox::BaseStatsReporter::get_instance()) {    \
+        facebook::velox::BaseStatsReporter::get_instance()->addMetricValue((key), ##__VA_ARGS__);        \
     }                                                          \
   }
 
 #define DEFINE_HISTOGRAM_METRIC(key, bucket, min, max, ...)    \
   {                                                            \
-    if (::facebook::velox::BaseStatsReporter::registered) {    \
-      auto reporter = folly::Singleton<                        \
-          facebook::velox::BaseStatsReporter>::try_get_fast(); \
-      if (FOLLY_LIKELY(reporter != nullptr)) {                 \
-        reporter->registerHistogramMetricExportType(           \
+    if (::facebook::velox::BaseStatsReporter::get_instance()) {    \
+        facebook::velox::BaseStatsReporter::get_instance()->registerHistogramMetricExportType(           \
             (key),                                             \
             (bucket),                                          \
             (min),                                             \
             (max),                                             \
             (std::vector<int32_t>({__VA_ARGS__})));            \
-      }                                                        \
     }                                                          \
   }
 
 #define RECORD_HISTOGRAM_METRIC_VALUE(key, ...)                  \
   {                                                              \
-    if (::facebook::velox::BaseStatsReporter::registered) {      \
-      auto reporter = folly::Singleton<                          \
-          facebook::velox::BaseStatsReporter>::try_get_fast();   \
-      if (FOLLY_LIKELY(reporter != nullptr)) {                   \
-        reporter->addHistogramMetricValue((key), ##__VA_ARGS__); \
+    if (::facebook::velox::BaseStatsReporter::get_instance()) {      \
+        facebook::velox::BaseStatsReporter::get_instance()->addHistogramMetricValue((key), ##__VA_ARGS__); \
       }                                                          \
-    }                                                            \
   }
 } // namespace facebook::velox

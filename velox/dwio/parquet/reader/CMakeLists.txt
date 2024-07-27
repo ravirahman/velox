@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+find_package(Thrift CONFIG REQUIRED)
 
 add_library(
   velox_dwio_native_parquet_reader
@@ -35,5 +36,5 @@ target_link_libraries(
   fmt::fmt
   arrow
   Snappy::snappy
-  thrift
+  thrift::thrift
   zstd::zstd)

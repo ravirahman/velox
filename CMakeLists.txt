@@ -518,7 +518,7 @@ if(NOT VELOX_DISABLE_GOOGLETEST)
 endif()
 
 set_source(xsimd)
-resolve_dependency(xsimd)
+resolve_dependency(xsimd 10.0.0)
 
 set(stemmer_SOURCE BUNDLED)
 resolve_dependency(stemmer)

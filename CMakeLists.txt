@@ -469,7 +469,7 @@ if(${VELOX_BUILD_MINIMAL_WITH_DWIO}
    OR ${VELOX_ENABLE_SUBSTRAIT})
   # Locate or build protobuf.
   # set_source(Protobuf)
-  resolve_dependency(Protobuf)
+  find_package(protobuf CONFIG REQUIRED)
   include_directories(${Protobuf_INCLUDE_DIRS})
 endif()
 

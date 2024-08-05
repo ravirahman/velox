@@ -468,8 +468,8 @@ if(${VELOX_BUILD_MINIMAL_WITH_DWIO}
    OR ${VELOX_ENABLE_HIVE_CONNECTOR}
    OR ${VELOX_ENABLE_SUBSTRAIT})
   # Locate or build protobuf.
-  set_source(Protobuf)
-  resolve_dependency(Protobuf 3.21 EXACT)
+  # set_source(Protobuf)
+  resolve_dependency(Protobuf)
   include_directories(${Protobuf_INCLUDE_DIRS})
 endif()
 
@@ -518,7 +518,7 @@ if(NOT VELOX_DISABLE_GOOGLETEST)
 endif()
 
 set_source(xsimd)
-resolve_dependency(xsimd 10.0.0)
+resolve_dependency(xsimd)
 
 set(stemmer_SOURCE BUNDLED)
 resolve_dependency(stemmer)

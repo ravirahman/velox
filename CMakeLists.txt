@@ -442,8 +442,7 @@ if(${VELOX_BUILD_MINIMAL_WITH_DWIO}
    OR VELOX_ENABLE_GCS)
 
   # Locate or build protobuf.
-  set_source(Protobuf)
-  resolve_dependency(Protobuf CONFIG 3.21.7 REQUIRED)
+  find_package(protobuf CONFIG REQUIRED)
   include_directories(${Protobuf_INCLUDE_DIRS})
 endif()
 
@@ -468,15 +467,6 @@ else()
   set(FOLLY_BENCHMARK Folly::follybenchmark)
 endif()
 
-# DWIO (ORC/DWRF) and Substrait depend on protobuf.
-if(${VELOX_BUILD_MINIMAL_WITH_DWIO}
-   OR ${VELOX_ENABLE_HIVE_CONNECTOR}
-   OR ${VELOX_ENABLE_SUBSTRAIT})
-  # Locate or build protobuf.
-  # set_source(Protobuf)
-  find_package(protobuf CONFIG REQUIRED)
-  include_directories(${Protobuf_INCLUDE_DIRS})
-endif()
 if(VELOX_ENABLE_GCS)
   set_source(google_cloud_cpp_storage)
   resolve_dependency(google_cloud_cpp_storage CONFIG 2.22.0 REQUIRED)

@@ -15,10 +15,11 @@
  */
 
 #include <algorithm>
+#include "velox/functions/lib/aggregates/Compare.h"
 #include "velox/functions/lib/aggregates/MinMaxByAggregatesBase.h"
 #include "velox/functions/lib/aggregates/ValueSet.h"
 #include "velox/functions/prestosql/aggregates/AggregateNames.h"
-#include "velox/functions/prestosql/aggregates/Compare.h"
+#include "velox/type/FloatingPointUtil.h"
 
 using namespace facebook::velox::functions::aggregate;
 
@@ -40,8 +41,16 @@ struct Comparator {
         return true;
       }
       if constexpr (greaterThan) {
+        if constexpr (std::is_floating_point_v<T>) {
+          return util::floating_point::NaNAwareGreaterThan<T>{}(
+              newComparisons.valueAt<T>(index), *accumulator);
+        }
         return newComparisons.valueAt<T>(index) > *accumulator;
       } else {
+        if constexpr (std::is_floating_point_v<T>) {
+          return util::floating_point::NaNAwareLessThan<T>{}(
+              newComparisons.valueAt<T>(index), *accumulator);
+        }
         return newComparisons.valueAt<T>(index) < *accumulator;
       }
     } else {
@@ -49,10 +58,18 @@ struct Comparator {
       // is less than vector value.
       if constexpr (greaterThan) {
         return !accumulator->hasValue() ||
-            prestosql::compare(accumulator, newComparisons, index) < 0;
+            functions::aggregate::compare(
+                accumulator,
+                newComparisons,
+                index,
+                CompareFlags::NullHandlingMode::kNullAsIndeterminate) < 0;
       } else {
         return !accumulator->hasValue() ||
-            prestosql::compare(accumulator, newComparisons, index) > 0;
+            functions::aggregate::compare(
+                accumulator,
+                newComparisons,
+                index,
+                CompareFlags::NullHandlingMode::kNullAsIndeterminate) > 0;
       }
     }
   }
@@ -90,11 +107,15 @@ struct MinMaxByNAccumulator {
   int64_t n{0};
 
   using Pair = std::pair<C, std::optional<V>>;
-  using Heap = std::vector<Pair, StlAllocator<Pair>>;
+  using Allocator = std::conditional_t<
+      std::is_same_v<int128_t, V> || std::is_same_v<int128_t, C>,
+      AlignedStlAllocator<Pair, sizeof(int128_t)>,
+      StlAllocator<Pair>>;
+  using Heap = std::vector<Pair, Allocator>;
   Heap heapValues;
 
   explicit MinMaxByNAccumulator(HashStringAllocator* allocator)
-      : heapValues{StlAllocator<Pair>(allocator)} {}
+      : heapValues{Allocator(allocator)} {}
 
   int64_t getN() const {
     return n;
@@ -548,10 +569,16 @@ template <typename V, typename C>
 struct Less {
   using Pair = std::pair<C, std::optional<V>>;
   bool operator()(const Pair& lhs, const Pair& rhs) {
+    if constexpr (std::is_floating_point_v<C>) {
+      return util::floating_point::NaNAwareLessThan<C>{}(lhs.first, rhs.first);
+    }
     return lhs.first < rhs.first;
   }
 
   bool compare(C lhs, const Pair& rhs) {
+    if constexpr (std::is_floating_point_v<C>) {
+      return util::floating_point::NaNAwareLessThan<C>{}(lhs, rhs.first);
+    }
     return lhs < rhs.first;
   }
 };
@@ -560,10 +587,17 @@ template <typename V, typename C>
 struct Greater {
   using Pair = std::pair<C, std::optional<V>>;
   bool operator()(const Pair& lhs, const Pair& rhs) {
+    if constexpr (std::is_floating_point_v<C>) {
+      return util::floating_point::NaNAwareGreaterThan<C>{}(
+          lhs.first, rhs.first);
+    }
     return lhs.first > rhs.first;
   }
 
   bool compare(C lhs, const Pair& rhs) {
+    if constexpr (std::is_floating_point_v<C>) {
+      return util::floating_point::NaNAwareGreaterThan<C>{}(lhs, rhs.first);
+    }
     return lhs > rhs.first;
   }
 };
@@ -1041,6 +1075,8 @@ std::unique_ptr<exec::Aggregate> createNArg(
       return std::make_unique<NAggregate<W, int32_t>>(resultType);
     case TypeKind::BIGINT:
       return std::make_unique<NAggregate<W, int64_t>>(resultType);
+    case TypeKind::HUGEINT:
+      return std::make_unique<NAggregate<W, int128_t>>(resultType);
     case TypeKind::REAL:
       return std::make_unique<NAggregate<W, float>>(resultType);
     case TypeKind::DOUBLE:
@@ -1076,6 +1112,9 @@ std::unique_ptr<exec::Aggregate> createNArg(
           resultType, compareType, errorMessage);
     case TypeKind::BIGINT:
       return createNArg<NAggregate, int64_t>(
+          resultType, compareType, errorMessage);
+    case TypeKind::HUGEINT:
+      return createNArg<NAggregate, int128_t>(
           resultType, compareType, errorMessage);
     case TypeKind::REAL:
       return createNArg<NAggregate, float>(
@@ -1139,12 +1178,14 @@ exec::AggregateRegistrationResult registerMinMaxBy(
                            .argumentType("V")
                            .argumentType("C")
                            .build());
+  // Add signatures for 3-arg version of min_by/max_by.
   const std::vector<std::string> supportedCompareTypes = {
       "boolean",
       "tinyint",
       "smallint",
       "integer",
       "bigint",
+      "hugeint",
       "real",
       "double",
       "varchar",
@@ -1164,7 +1205,18 @@ exec::AggregateRegistrationResult registerMinMaxBy(
                              .argumentType("bigint")
                              .build());
   }
-
+  signatures.push_back(
+      exec::AggregateFunctionSignatureBuilder()
+          .integerVariable("a_precision")
+          .integerVariable("a_scale")
+          .typeVariable("V")
+          .returnType("array(V)")
+          .intermediateType(
+              "row(bigint,array(DECIMAL(a_precision, a_scale)),array(V))")
+          .argumentType("V")
+          .argumentType("DECIMAL(a_precision, a_scale)")
+          .argumentType("bigint")
+          .build());
   return exec::registerAggregateFunction(
       name,
       std::move(signatures),

@@ -33,13 +33,25 @@ Array Functions
 
     Returns the average of all non-null elements of the array. If there are no non-null elements, returns null.
 
+.. function:: array_cum_sum(array(T)) -> array(T)
+    Returns the array whose elements are the cumulative sum of the input array, i.e. result[i] = input[1] + input[2] +
+    … + input[i]. If there there is null elements in the array, the cumulative sum at and after the element is null. ::
+
+        SELECT array_cum_sum(ARRAY [1, 2, 3]) -- array[1, 3, 6]
+        SELECT array_cum_sum(ARRAY [1, 2, null, 3]) -- array[1, 3, null, null]
+
 .. function:: array_distinct(array(E)) -> array(E)
 
-    Remove duplicate values from the input array. ::
+    Remove duplicate values from the input array.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal. ::
 
         SELECT array_distinct(ARRAY [1, 2, 3]); -- [1, 2, 3]
         SELECT array_distinct(ARRAY [1, 2, 1]); -- [1, 2]
         SELECT array_distinct(ARRAY [1, NULL, NULL]); -- [1, NULL]
+
+.. function:: array_dupes(array(E)) -> boolean
+
+    This is an alias for :func:`array_duplicates(array(E))`
 
 .. function:: array_duplicates(array(E)) -> array(E)
 
@@ -50,7 +62,8 @@ Array Functions
 
 .. function:: array_except(array(E) x, array(E) y) -> array(E)
 
-    Returns an array of the elements in array ``x`` but not in array ``y``, without duplicates. ::
+    Returns an array of the elements in array ``x`` but not in array ``y``, without duplicates.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal. ::
 
         SELECT array_except(ARRAY [1, 2, 3], ARRAY [4, 5, 6]); -- [1, 2, 3]
         SELECT array_except(ARRAY [1, 2, 3], ARRAY [1, 2]); -- [3]
@@ -68,6 +81,10 @@ Array Functions
         SELECT array_frequency(ARRAY ["knock", "knock", "who", "?"]); -- {"knock" -> 2, "who" -> 1, "?" -> 1}
         SELECT array_frequency(ARRAY []); -- {}
 
+.. function:: array_has_dupes(array(E)) -> boolean
+
+    This is an alias for :func:`array_has_duplicates(array(E))`.
+
 .. function:: array_has_duplicates(array(E)) -> boolean
 
     Returns a boolean: whether array has any elements that occur more than once.
@@ -77,7 +94,8 @@ Array Functions
 
 .. function:: array_intersect(array(E) x, array(E) y) -> array(E)
 
-    Returns an array of the elements in the intersection of array ``x`` and array ``y``, without duplicates. ::
+    Returns an array of the elements in the intersection of array ``x`` and array ``y``, without duplicates.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal. ::
 
         SELECT array_intersect(ARRAY [1, 2, 3], ARRAY[4, 5, 6]); -- []
         SELECT array_intersect(ARRAY [1, 2, 2], ARRAY[1, 1, 2]); -- [1, 2]
@@ -94,30 +112,30 @@ Array Functions
 .. function:: array_max(array(E)) -> E
 
     Returns the maximum value of input array.
-    Returns NaN if E is REAL or DOUBLE and array contains a NaN value.
-    Returns NULL if array doesn't contain a NaN value, but contains a NULL value. ::
+    NaN is considered to be greater than Infinity.
+    Returns NULL if array contains a NULL value. ::
 
         SELECT array_max(ARRAY [1, 2, 3]); -- 3
         SELECT array_max(ARRAY [-1, -2, -2]); -- -1
         SELECT array_max(ARRAY [-1, -2, NULL]); -- NULL
         SELECT array_max(ARRAY []); -- NULL
-        SELECT array_max(ARRAY[NULL, nan()]); -- NaN
+        SELECT array_max(ARRAY [-1, nan(), NULL]); -- NULL
         SELECT array_max(ARRAY[{-1, -2, -3, nan()]); -- NaN
-        SELECT array_max(ARRAY[-0.0001, NULL, -0.0003, nan()]); -- NaN
+        SELECT array_max(ARRAY[{infinity(), nan()]); -- NaN
 
 .. function:: array_min(array(E)) -> E
 
     Returns the minimum value of input array.
-    Returns NaN if E is REAL or DOUBLE and array contains a NaN value.
-    Returns NULL if array doesn't contain a NaN value, but contains a NULL value. ::
+    NaN is considered to be greater than Infinity.
+    Returns NULL if array contains a NULL value. ::
 
         SELECT array_min(ARRAY [1, 2, 3]); -- 1
         SELECT array_min(ARRAY [-1, -2, -2]); -- -2
         SELECT array_min(ARRAY [-1, -2, NULL]); -- NULL
         SELECT array_min(ARRAY []); -- NULL
-        SELECT array_min(ARRAY[NULL, nan()]); -- NaN
-        SELECT array_min(ARRAY[{-1, -2, -3, nan()]); -- NaN
-        SELECT array_min(ARRAY[-0.0001, NULL, -0.0003, nan()]); -- NaN
+        SELECT array_min(ARRAY [-1, nan(), NULL]); -- NULL
+        SELECT array_min(ARRAY[{-1, -2, -3, nan()]); -- -1
+        SELECT array_min(ARRAY[{infinity(), nan()]); -- Infinity
 
 .. function:: array_normalize(array(E), E) -> array(E)
 
@@ -127,22 +145,32 @@ Array Functions
 
     Tests if arrays ``x`` and ``y`` have any non-null elements in common.
     Returns null if there are no non-null elements in common but either array contains null.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal.
+
+.. function:: arrays_union(x, y) -> array
+
+    Returns an array of the elements in the union of x and y, without duplicates.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal.
 
 .. function:: array_position(x, element) -> bigint
 
     Returns the position of the first occurrence of the ``element`` in array ``x`` (or 0 if not found).
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal.
 
 .. function:: array_position(x, element, instance) -> bigint
     :noindex:
 
     If ``instance > 0``, returns the position of the ``instance``-th occurrence of the ``element`` in array ``x``. If ``instance < 0``, returns the position of the ``instance``-to-last occurrence of the ``element`` in array ``x``. If no matching element instance is found, 0 is returned.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal.
 
 .. function:: array_remove(x, element) -> array
 
     Remove all elements that equal ``element`` from array ``x``.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal.
 
         SELECT array_remove(ARRAY [1, 2, 3], 3); -- [1, 2]
         SELECT array_remove(ARRAY [2, 1, NULL], 1); -- [2, NULL]
+        SELECT array_remove(ARRAY [2.1, 1.1, nan()], nan()); -- [2.1, 1.1]
 
 .. function:: array_sort(array(E)) -> array(E)
 
@@ -153,6 +181,7 @@ Array Functions
 
         SELECT array_sort(ARRAY [1, 2, 3]); -- [1, 2, 3]
         SELECT array_sort(ARRAY [3, 2, 1]); -- [1, 2, 3]
+        SELECT array_sort(ARRAY [infinity(), -1.1, nan(), 1.1, -Infinity(), 0])); -- [-Infinity, -1.1, 0, 1.1, Infinity, NaN]
         SELECT array_sort(ARRAY [2, 1, NULL]; -- [1, 2, NULL]
         SELECT array_sort(ARRAY [NULL, 1, NULL]); -- [1, NULL, NULL]
         SELECT array_sort(ARRAY [NULL, 2, 1]); -- [1, 2, NULL]
@@ -221,8 +250,10 @@ Array Functions
 
     Returns true if the array ``x`` contains the ``element``.
     When 'element' is of complex type, throws if 'x' or 'element' contains nested nulls
-    and these need to be compared to produce a result. ::
+    and these need to be compared to produce a result.
+    For REAL and DOUBLE, NANs (Not-a-Number) are considered equal. ::
 
+        SELECT contains(ARRAY [2.1, 1.1, nan()], nan()); -- true.
         SELECT contains(ARRAY[ARRAY[1, 3]], ARRAY[2, null]); -- false.
         SELECT contains(ARRAY[ARRAY[2, 3]], ARRAY[2, null]); -- failed: contains does not support arrays with elements that are null or contain null
         SELECT contains(ARRAY[ARRAY[2, null]], ARRAY[2, 1]); -- failed: contains does not support arrays with elements that are null or contain null

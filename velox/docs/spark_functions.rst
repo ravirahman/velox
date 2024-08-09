@@ -2,6 +2,8 @@
 Spark Functions
 ***********************
 
+The semantics of Spark functions match Spark 3.5 with ANSI OFF.
+
 .. toctree::
     :maxdepth: 1
 
@@ -18,6 +20,9 @@ Spark Functions
     functions/spark/binary
     functions/spark/aggregate
     functions/spark/window
+    functions/spark/conversion
+    functions/spark/url
+    functions/spark/json
 
 Here is a list of all scalar and aggregate Spark functions available in Velox.
 Function names link to function descriptions. Check out coverage maps

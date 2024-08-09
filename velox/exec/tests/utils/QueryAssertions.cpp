@@ -27,6 +27,8 @@
 using facebook::velox::duckdb::duckdbTimestampToVelox;
 using facebook::velox::duckdb::veloxTimestampToDuckDB;
 
+DEFINE_int32(max_error_rows, 10, "Max number of listed error rows");
+
 namespace facebook::velox::exec::test {
 namespace {
 
@@ -136,12 +138,17 @@ template <>
     const VectorPtr& vector,
     vector_size_t index) {
   using T = typename KindToFlatVector<TypeKind::HUGEINT>::WrapperType;
-  auto type = vector->type()->asLongDecimal();
   auto val = vector->as<SimpleVector<T>>()->valueAt(index);
   auto duckVal = ::duckdb::hugeint_t();
   duckVal.lower = (val << 64) >> 64;
   duckVal.upper = (val >> 64);
-  return ::duckdb::Value::DECIMAL(duckVal, type.precision(), type.scale());
+  if (vector->type()->isLongDecimal()) {
+    auto type = vector->type()->asLongDecimal();
+    return ::duckdb::Value::DECIMAL(
+        std::move(duckVal), type.precision(), type.scale());
+  }
+  // Flat vector is HUGEINT type and not the logical decimal type.
+  return ::duckdb::Value::HUGEINT(std::move(duckVal));
 }
 
 template <>
@@ -257,8 +264,9 @@ velox::variant variantAt<TypeKind::HUGEINT>(
     ::duckdb::DataChunk* dataChunk,
     int32_t row,
     int32_t column) {
-  auto hugeInt = ::duckdb::HugeIntValue::Get(dataChunk->GetValue(column, row));
-  return velox::variant(HugeInt::build(hugeInt.upper, hugeInt.lower));
+  auto unscaledValue =
+      dataChunk->GetValue(column, row).GetValue<::duckdb::hugeint_t>();
+  return variant(HugeInt::build(unscaledValue.upper, unscaledValue.lower));
 }
 
 template <>
@@ -670,7 +678,8 @@ std::string makeErrorMessage(
   message << extraRows.size() << " extra rows, " << missingRows.size()
           << " missing rows" << std::endl;
 
-  auto extraRowsToPrint = std::min((size_t)10, extraRows.size());
+  auto extraRowsToPrint =
+      std::min((size_t)FLAGS_max_error_rows, extraRows.size());
   message << extraRowsToPrint << " of extra rows:" << std::endl;
 
   for (int32_t i = 0; i < extraRowsToPrint; i++) {
@@ -680,7 +689,8 @@ std::string makeErrorMessage(
   }
   message << std::endl;
 
-  auto missingRowsToPrint = std::min((size_t)10, missingRows.size());
+  auto missingRowsToPrint =
+      std::min((size_t)FLAGS_max_error_rows, missingRows.size());
   message << missingRowsToPrint << " of missing rows:" << std::endl;
   for (int32_t i = 0; i < missingRowsToPrint; i++) {
     message << "\t";
@@ -869,14 +879,20 @@ std::vector<MaterializedRow> materialize(const RowVectorPtr& vector) {
   std::vector<MaterializedRow> rows;
   rows.reserve(size);
 
-  auto rowType = vector->type()->as<TypeKind::ROW>();
+  auto numColumns = vector->childrenSize();
+  std::vector<VectorPtr> simpleVectors(numColumns);
+
+  // variantAt() assumes you can upcast to SimpleVector, so we need to take
+  // the inner vector out of lazies first.
+  for (size_t i = 0; i < numColumns; ++i) {
+    simpleVectors[i] = BaseVector::loadedVectorShared(vector->childAt(i));
+  }
 
   for (size_t i = 0; i < size; ++i) {
-    auto numColumns = rowType.size();
     MaterializedRow row;
     row.reserve(numColumns);
     for (size_t j = 0; j < numColumns; ++j) {
-      row.push_back(variantAt(vector->childAt(j), i));
+      row.push_back(variantAt(simpleVectors[j], i));
     }
     rows.push_back(row);
   }
@@ -890,7 +906,7 @@ void DuckDbQueryRunner::createTable(
   auto query = fmt::format("DROP TABLE IF EXISTS {}", name);
   execute(query);
 
-  auto rowType = data[0]->type()->as<TypeKind::ROW>();
+  auto& rowType = data[0]->type()->as<TypeKind::ROW>();
   ::duckdb::Connection con(db_);
   auto sql = duckdb::makeCreateTableSql(name, rowType);
   auto res = con.Query(sql);

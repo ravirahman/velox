@@ -153,7 +153,9 @@ void SelectiveRepeatedColumnReader::makeOffsetsAndSizes(
     rawOffsets[i] = nestedRowIndex;
     if (nulls && bits::isBitNull(nulls, row)) {
       rawSizes[i] = 0;
-      bits::setNull(rawResultNulls_, i);
+      if (!returnReaderNulls_) {
+        bits::setNull(rawResultNulls_, i);
+      }
       anyNulls_ = true;
     } else {
       currentOffset += allLengths_[row];
@@ -186,26 +188,13 @@ RowSet SelectiveRepeatedColumnReader::applyFilter(RowSet rows) {
   return outputRows_;
 }
 
-void SelectiveRepeatedColumnReader::setResultNulls(BaseVector& result) {
-  if (anyNulls_) {
-    resultNulls_->setSize(bits::nbytes(result.size()));
-    result.setNulls(resultNulls_);
-  } else {
-    result.resetNulls();
-  }
-}
-
 SelectiveListColumnReader::SelectiveListColumnReader(
-    const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+    const TypePtr& requestedType,
     const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
     FormatParams& params,
     velox::common::ScanSpec& scanSpec)
-    : SelectiveRepeatedColumnReader(
-          fileType->type(),
-          params,
-          scanSpec,
-          fileType),
-      requestedType_{requestedType} {}
+    : SelectiveRepeatedColumnReader(requestedType, params, scanSpec, fileType) {
+}
 
 uint64_t SelectiveListColumnReader::skip(uint64_t numValues) {
   numValues = formatData_->skipNulls(numValues);
@@ -248,28 +237,24 @@ void SelectiveListColumnReader::read(
 
 void SelectiveListColumnReader::getValues(RowSet rows, VectorPtr* result) {
   VELOX_DCHECK_NOT_NULL(result);
-  prepareResult(*result, requestedType_->type(), rows.size(), &memoryPool_);
+  prepareResult(*result, requestedType_, rows.size(), &memoryPool_);
   auto* resultArray = result->get()->asUnchecked<ArrayVector>();
   makeOffsetsAndSizes(rows, *resultArray);
-  setResultNulls(**result);
+  result->get()->setNulls(resultNulls());
   if (child_ && !nestedRows_.empty()) {
     auto& elements = resultArray->elements();
-    prepareStructResult(requestedType_->type()->childAt(0), &elements);
+    prepareStructResult(requestedType_->childAt(0), &elements);
     child_->getValues(nestedRows_, &elements);
   }
 }
 
 SelectiveMapColumnReader::SelectiveMapColumnReader(
-    const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+    const TypePtr& requestedType,
     const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
     FormatParams& params,
     velox::common::ScanSpec& scanSpec)
-    : SelectiveRepeatedColumnReader(
-          fileType->type(),
-          params,
-          scanSpec,
-          fileType),
-      requestedType_{requestedType} {}
+    : SelectiveRepeatedColumnReader(requestedType, params, scanSpec, fileType) {
+}
 
 uint64_t SelectiveMapColumnReader::skip(uint64_t numValues) {
   numValues = formatData_->skipNulls(numValues);
@@ -329,10 +314,14 @@ void SelectiveMapColumnReader::read(
 
 void SelectiveMapColumnReader::getValues(RowSet rows, VectorPtr* result) {
   VELOX_DCHECK_NOT_NULL(result);
-  prepareResult(*result, requestedType_->type(), rows.size(), &memoryPool_);
+  VELOX_CHECK(
+      !result->get() || result->get()->type()->isMap(),
+      "Expect MAP result vector, got {}",
+      result->get()->type()->toString());
+  prepareResult(*result, requestedType_, rows.size(), &memoryPool_);
   auto* resultMap = result->get()->asUnchecked<MapVector>();
   makeOffsetsAndSizes(rows, *resultMap);
-  setResultNulls(**result);
+  result->get()->setNulls(resultNulls());
   VELOX_CHECK(
       keyReader_ && elementReader_,
       "keyReader_ and elementReaer_ must exist in "
@@ -340,7 +329,7 @@ void SelectiveMapColumnReader::getValues(RowSet rows, VectorPtr* result) {
   if (!nestedRows_.empty()) {
     keyReader_->getValues(nestedRows_, &resultMap->mapKeys());
     auto& values = resultMap->mapValues();
-    prepareStructResult(requestedType_->type()->childAt(1), &values);
+    prepareStructResult(requestedType_->childAt(1), &values);
     elementReader_->getValues(nestedRows_, &values);
   }
 }

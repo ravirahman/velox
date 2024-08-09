@@ -17,7 +17,6 @@
 #pragma once
 
 #include "velox/common/memory/Memory.h"
-#include "velox/dwio/common/ColumnSelector.h"
 #include "velox/dwio/common/ScanSpec.h"
 #include "velox/dwio/common/SeekableInputStream.h"
 #include "velox/dwio/common/Statistics.h"
@@ -34,7 +33,7 @@ class FormatData {
 
   template <typename T>
   T& as() {
-    return *reinterpret_cast<T*>(this);
+    return *static_cast<T*>(this);
   }
 
   /// Reads nulls if the format has nulls separate from the encoded

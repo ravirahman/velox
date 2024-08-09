@@ -25,13 +25,16 @@
 
 namespace facebook::velox::wave {
 
-class TableScan : public WaveOperator {
+class TableScan : public WaveSourceOperator {
  public:
   TableScan(
       CompileState& state,
       int32_t operatorId,
       const core::TableScanNode& tableScanNode)
-      : WaveOperator(state, tableScanNode.outputType(), tableScanNode.id()),
+      : WaveSourceOperator(
+            state,
+            tableScanNode.outputType(),
+            tableScanNode.id()),
         tableHandle_(tableScanNode.tableHandle()),
         columnHandles_(tableScanNode.assignments()),
         driverCtx_(state.driver().driverCtx()),
@@ -47,16 +50,9 @@ class TableScan : public WaveOperator {
     connector_ = connector::getConnector(tableHandle_->connectorId());
   }
 
-  int32_t canAdvance() override {
-    if (!dataSource_) {
-      return 0;
-    }
-    return waveDataSource_->canAdvance();
-  }
+  AdvanceResult canAdvance(WaveStream& stream) override;
 
-  void schedule(WaveStream& stream, int32_t maxRows = 0) override {
-    waveDataSource_->schedule(stream, maxRows);
-  }
+  void schedule(WaveStream& stream, int32_t maxRows = 0) override;
 
   vector_size_t outputSize(WaveStream& stream) const {
     return waveDataSource_->outputSize(stream);
@@ -159,5 +155,13 @@ class TableScan : public WaveOperator {
   // The last value of the IO wait time of 'this' that has been added to the
   // global static 'ioWaitNanos_'.
   uint64_t lastIoWaitNanos_{0};
+
+  // The value returned by canAdvance() of the WaveDataSource after last
+  // schedule().
+  int32_t nextAvailableRows_{0};
+
+  // True if canAdvance() should do waveDataSource_->canAdvance() instead of
+  // returning 'nextAvailableRows_'.
+  bool isNewSplit_{false};
 };
 } // namespace facebook::velox::wave

@@ -129,6 +129,14 @@ Generic Configuration
      - 0
      - If it is not zero, specifies the time limit that a driver can continuously
        run on a thread before yield. If it is zero, then it no limit.
+   * - prefixsort_normalized_key_max_bytes
+     - integer
+     - 128
+     - Maximum number of bytes to use for the normalized key in prefix-sort. Use 0 to disable prefix-sort.
+   * - prefixsort_min_rows
+     - integer
+     - 130
+     - Minimum number of rows to use prefix-sort. The default value has been derived using micro-benchmarking.
 
 .. _expression-evaluation-conf:
 
@@ -295,6 +303,11 @@ Spilling
      - 4MB
      - The maximum size in bytes to buffer the serialized spill data before write to disk for IO efficiency.
        If set to zero, buffering is disabled.
+   * - spill_read_buffer_size
+     - integer
+     - 1MB
+     - The buffer size in bytes to read from one spilled file. If the underlying filesystem supports async
+       read, we do read-ahead with double buffering, which doubles the buffer used to read from each spill file.
    * - min_spill_run_size
      - integer
      - 256MB
@@ -465,12 +478,45 @@ Each query can override the config by setting corresponding query session proper
      - string
      - 16M
      - Maximum dictionary memory that can be used in orc writer.
+   * - hive.orc.writer.integer-dictionary-encoding-enabled
+     - orc_optimized_writer_integer_dictionary_encoding_enabled
+     - bool
+     - true
+     - Whether or not dictionary encoding of integer types should be used by the ORC writer.
+   * - hive.orc.writer.string-dictionary-encoding-enabled
+     - orc_optimized_writer_string_dictionary_encoding_enabled
+     - bool
+     - true
+     - Whether or not dictionary encoding of string types should be used by the ORC writer.
    * - hive.parquet.writer.timestamp-unit
      - hive.parquet.writer.timestamp_unit
      - tinyint
      - 9
      - Timestamp unit used when writing timestamps into Parquet through Arrow bridge.
        Valid values are 0 (second), 3 (millisecond), 6 (microsecond), 9 (nanosecond).
+   * - hive.orc.writer.linear-stripe-size-heuristics
+     - orc_writer_linear_stripe_size_heuristics
+     - bool
+     - true
+     - Enables historical based stripe size estimation after compression.
+   * - hive.orc.writer.min-compression-size
+     - orc_writer_min_compression_size
+     - integer
+     - 1024
+     - Minimal number of items in an encoded stream.
+   * - hive.orc.writer.compression-level
+     - orc_optimized_writer_compression_level
+     - tinyint
+     - 3 for ZSTD and 4 for ZLIB
+     - The compression level to use with ZLIB and ZSTD.
+   * - cache.no_retention
+     - cache.no_retention
+     - bool
+     - false
+     - If true, evict out a query scanned data out of in-memory cache right after the access,
+       and also skip staging to the ssd cache. This helps to prevent the cache space pollution
+       from the one-time table scan by large batch query when mixed running with interactive
+       query which has high data locality.
 
 ``Amazon S3 Configuration``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -536,7 +582,18 @@ Each query can override the config by setting corresponding query session proper
      - integer
      -
      - Maximum concurrent TCP connections for a single http client.
-
+   * - hive.s3.max-attempts
+     - integer
+     -
+     - Maximum attempts for connections to a single http client, work together with retry-mode. By default, it's 3 for standard/adaptive mode
+       and 10 for legacy mode.
+   * - hive.s3.retry-mode
+     - string
+     -
+     - **Allowed values:** "standard", "adaptive", "legacy". By default it's empty, S3 client will be created with RetryStrategy.
+       Legacy mode only enables throttled retry for transient errors.
+       Standard mode is built on top of legacy mode and has throttled retry enabled for throttling errors apart from transient errors.
+       Adaptive retry mode dynamically limits the rate of AWS requests to maximize success rate.
 ``Google Cloud Storage Configuration``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. list-table::
@@ -559,6 +616,14 @@ Each query can override the config by setting corresponding query session proper
      - string
      -
      - The GCS service account configuration as json string.
+   * - hive.gcs.max-retry-count
+     - integer
+     -
+     - The GCS maximum retry counter of transient errors.
+   * - hive.gcs.max-retry-time
+     - string
+     -
+     - The GCS maximum time allowed to retry transient errors.
 
 ``Azure Blob Storage Configuration``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -18,8 +18,27 @@
 #include "velox/common/base/SimdUtil.h"
 #include "velox/experimental/wave/common/StringView.h"
 #include "velox/vector/FlatVector.h"
+#include "velox/vector/VectorTypeUtils.h"
 
 namespace facebook::velox::wave {
+
+template <TypeKind Kind>
+static int32_t kindSize() {
+  return sizeof(typename KindToFlatVector<Kind>::WrapperType);
+}
+
+int32_t waveTypeKindSize(WaveTypeKind waveKind) {
+  TypeKind kind = static_cast<TypeKind>(waveKind);
+  if (kind == TypeKind::VARCHAR || kind == TypeKind::VARBINARY) {
+    // Wave StringView is 8, not 16 bytes.
+    return sizeof(StringView);
+  }
+  if (kind == TypeKind::UNKNOWN) {
+    return sizeof(UnknownValue);
+  }
+
+  return VELOX_DYNAMIC_TYPE_DISPATCH(kindSize, kind);
+}
 
 WaveVector::WaveVector(
     const TypePtr& type,
@@ -94,7 +113,7 @@ void toBits(uint64_t* words, int32_t numBytes) {
   auto data = reinterpret_cast<uint8_t*>(words);
   auto zero = xsimd::broadcast<uint8_t>(0);
   for (auto i = 0; i < numBytes; i += xsimd::batch<uint8_t>::size) {
-    auto flags = xsimd::batch<uint8_t>::load_unaligned(data) != zero;
+    auto flags = xsimd::batch<uint8_t>::load_unaligned(data + i) != zero;
     uint32_t bits = simd::toBitMask(flags);
     reinterpret_cast<uint32_t*>(words)[i / sizeof(flags)] = bits;
   }
@@ -106,7 +125,6 @@ class NoReleaser {
   void addRef() const {};
   void release() const {};
 };
-} // namespace
 
 template <TypeKind kind>
 static VectorPtr toVeloxTyped(
@@ -137,6 +155,16 @@ static VectorPtr toVeloxTyped(
       std::move(valuesView),
       std::vector<BufferPtr>());
 }
+
+bool isDenselyFilled(const BlockStatus* status, int32_t numBlocks) {
+  for (int32_t i = 0; i < numBlocks - 1; ++i) {
+    if (status[i].numRows != kBlockSize) {
+      return false;
+    }
+  }
+  return true;
+}
+} // namespace
 
 int32_t statusNumRows(const BlockStatus* status, int32_t numBlocks) {
   int32_t numRows = 0;
@@ -174,51 +202,52 @@ VectorPtr WaveVector::toVelox(
     int32_t numBlocks,
     const BlockStatus* status,
     const Operand* operand) {
+  auto operandIndices = operand->indices;
+  // If there is a wrap, any row can be referenced, so the vector is
+  // with size_ of WaveVector. If there is no wrap, it is mapped to
+  // the end of the last BlockStatus. If the blocks are densely filled
+  // we have the vector at right size with no wrap on top.
+  int32_t filledSize = operandIndices
+      ? size_
+      : (kBlockSize * (numBlocks - 1)) + status[numBlocks - 1].numRows;
   auto base = VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH_ALL(
-      toVeloxTyped, type_->kind(), size_, pool, type_, values_, nulls_);
+      toVeloxTyped, type_->kind(), filledSize, pool, type_, values_, nulls_);
   if (!status || !operand) {
     return base;
   }
 
   // Translate the BlockStatus and indices in Operand to a host side dictionary
   // wrap.
-  int maxRow = std::min<int32_t>(size_, numBlocks * kBlockSize);
+  int maxRow = std::min<int32_t>(filledSize, numBlocks * kBlockSize);
   numBlocks = bits::roundUp(maxRow, kBlockSize) / kBlockSize;
   int numActive = statusNumRows(status, numBlocks);
-  auto operandIndices = operand->indices;
   if (!operandIndices) {
     // Vector sizes are >= active in status because they are allocated before
     // the row count in status becomes known.
     VELOX_CHECK_LE(
         numActive,
         size_,
-        "If there is no indirection in Operand, vector size must be <= BlockStatus");
-    return base;
+        "If there is no indirection in Operand, vector size must be >= BlockStatus");
+    // If all blocks except last are full we return base without wrap.
+    if (isDenselyFilled(status, numBlocks)) {
+      return base;
+    }
   }
   auto indices = AlignedBuffer::allocate<vector_size_t>(numActive, pool);
   auto rawIndices = indices->asMutable<vector_size_t>();
   int32_t fill = 0;
   for (auto block = 0; block < numBlocks; ++block) {
-    auto blockIndices = operandIndices[block];
+    auto blockIndices = operandIndices ? operandIndices[block] : nullptr;
     if (!blockIndices) {
-      if (block == numBlocks - 1) {
-        VELOX_CHECK_EQ(
-            size_ - block * kBlockSize,
-            status[block].numRows,
-            "If last block has no indices, its size must be the remainder of the vector");
-      } else {
-        VELOX_CHECK_EQ(
-            kBlockSize,
-            status->numRows,
-            "A block with no indices must have all rows active");
-      }
       for (auto i = 0; i < status[block].numRows; ++i) {
         rawIndices[fill++] = block * kBlockSize + i;
       }
     } else {
-      for (auto i = 0; i < status[block].numRows; ++i) {
-        rawIndices[fill++] = blockIndices[i];
-      }
+      memcpy(
+          rawIndices + fill,
+          blockIndices,
+          status[block].numRows * sizeof(int32_t));
+      fill += status[block].numRows;
     }
   }
   return BaseVector::wrapInDictionary(

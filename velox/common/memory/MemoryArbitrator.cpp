@@ -91,19 +91,18 @@ class NoopArbitrator final : public MemoryArbitrator {
     return "NOOP";
   }
 
-  // Noop arbitrator has no memory capacity limit so no operation needed for
-  // memory pool capacity reserve.
-  uint64_t growCapacity(MemoryPool* pool, uint64_t /*unused*/) override {
-    pool->grow(pool->maxCapacity(), 0);
-    return pool->capacity();
+  void addPool(const std::shared_ptr<MemoryPool>& pool) override {
+    VELOX_CHECK_EQ(pool->capacity(), 0);
+    growPool(pool.get(), pool->maxCapacity(), 0);
+  }
+
+  void removePool(MemoryPool* pool) override {
+    VELOX_CHECK_EQ(pool->reservedBytes(), 0);
   }
 
   // Noop arbitrator has no memory capacity limit so no operation needed for
   // memory pool capacity grow.
-  bool growCapacity(
-      MemoryPool* /*unused*/,
-      const std::vector<std::shared_ptr<MemoryPool>>& /*unused*/,
-      uint64_t /*unused*/) override {
+  bool growCapacity(MemoryPool* /*unused*/, uint64_t /*unused*/) override {
     return false;
   }
 
@@ -117,7 +116,6 @@ class NoopArbitrator final : public MemoryArbitrator {
   // Noop arbitrator has no memory capacity limit so no operation needed for
   // memory pool capacity shrink.
   uint64_t shrinkCapacity(
-      const std::vector<std::shared_ptr<MemoryPool>>& /* unused */,
       uint64_t /* unused */,
       bool /* unused */,
       bool /* unused */) override {
@@ -161,26 +159,40 @@ void MemoryArbitrator::unregisterFactory(const std::string& kind) {
   arbitratorFactories().unregisterFactory(kind);
 }
 
+/*static*/ bool MemoryArbitrator::growPool(
+    MemoryPool* pool,
+    uint64_t growBytes,
+    uint64_t reservationBytes) {
+  return pool->grow(growBytes, reservationBytes);
+}
+
+/*static*/ uint64_t MemoryArbitrator::shrinkPool(
+    MemoryPool* pool,
+    uint64_t targetBytes) {
+  return pool->shrink(targetBytes);
+}
+
 std::unique_ptr<MemoryReclaimer> MemoryReclaimer::create() {
   return std::unique_ptr<MemoryReclaimer>(new MemoryReclaimer());
 }
 
 // static
 uint64_t MemoryReclaimer::run(
-    const std::function<uint64_t()>& func,
+    const std::function<int64_t()>& func,
     Stats& stats) {
   uint64_t execTimeUs{0};
-  uint64_t reclaimedBytes{0};
+  int64_t reclaimedBytes{0};
   {
     MicrosecondTimer timer{&execTimeUs};
     reclaimedBytes = func();
   }
+  VELOX_CHECK_GE(reclaimedBytes, 0);
   stats.reclaimExecTimeUs += execTimeUs;
   stats.reclaimedBytes += reclaimedBytes;
   RECORD_HISTOGRAM_METRIC_VALUE(
       kMetricMemoryReclaimExecTimeMs, execTimeUs / 1'000);
-  RECORD_METRIC_VALUE(kMetricMemoryReclaimedBytes, reclaimedBytes);
-  RECORD_METRIC_VALUE(kMetricMemoryReclaimCount, 1);
+  RECORD_HISTOGRAM_METRIC_VALUE(kMetricMemoryReclaimedBytes, reclaimedBytes);
+  RECORD_METRIC_VALUE(kMetricMemoryReclaimCount);
   addThreadLocalRuntimeStat(
       "memoryReclaimWallNanos",
       RuntimeCounter(execTimeUs * 1'000, RuntimeCounter::Unit::kNanos));
@@ -223,7 +235,7 @@ uint64_t MemoryReclaimer::reclaim(
   // child pool with most reservation first.
   struct Candidate {
     std::shared_ptr<memory::MemoryPool> pool;
-    int64_t reservedBytes;
+    int64_t reclaimableBytes;
   };
   std::vector<Candidate> candidates;
   {
@@ -232,8 +244,8 @@ uint64_t MemoryReclaimer::reclaim(
     for (auto& entry : pool->children_) {
       auto child = entry.second.lock();
       if (child != nullptr) {
-        const int64_t reservedBytes = child->reservedBytes();
-        candidates.push_back(Candidate{std::move(child), reservedBytes});
+        const int64_t reclaimableBytes = child->reclaimableBytes().value_or(0);
+        candidates.push_back(Candidate{std::move(child), reclaimableBytes});
       }
     }
   }
@@ -242,11 +254,14 @@ uint64_t MemoryReclaimer::reclaim(
       candidates.begin(),
       candidates.end(),
       [](const auto& lhs, const auto& rhs) {
-        return lhs.reservedBytes > rhs.reservedBytes;
+        return lhs.reclaimableBytes > rhs.reclaimableBytes;
       });
 
   uint64_t reclaimedBytes{0};
   for (const auto& candidate : candidates) {
+    if (candidate.reclaimableBytes == 0) {
+      break;
+    }
     const auto bytes = candidate.pool->reclaim(targetBytes, maxWaitMs, stats);
     reclaimedBytes += bytes;
     if (targetBytes != 0) {
@@ -296,6 +311,15 @@ bool MemoryReclaimer::Stats::operator!=(
   return !(*this == other);
 }
 
+MemoryReclaimer::Stats& MemoryReclaimer::Stats::operator+=(
+    const MemoryReclaimer::Stats& other) {
+  numNonReclaimableAttempts += other.numNonReclaimableAttempts;
+  reclaimExecTimeUs += other.reclaimExecTimeUs;
+  reclaimedBytes += other.reclaimedBytes;
+  reclaimWaitTimeUs += other.reclaimWaitTimeUs;
+  return *this;
+}
+
 MemoryArbitrator::Stats::Stats(
     uint64_t _numRequests,
     uint64_t _numSucceeded,
@@ -310,8 +334,7 @@ MemoryArbitrator::Stats::Stats(
     uint64_t _freeReservedCapacityBytes,
     uint64_t _reclaimTimeUs,
     uint64_t _numNonReclaimableAttempts,
-    uint64_t _numReserves,
-    uint64_t _numReleases)
+    uint64_t _numShrinks)
     : numRequests(_numRequests),
       numSucceeded(_numSucceeded),
       numAborted(_numAborted),
@@ -325,22 +348,19 @@ MemoryArbitrator::Stats::Stats(
       freeReservedCapacityBytes(_freeReservedCapacityBytes),
       reclaimTimeUs(_reclaimTimeUs),
       numNonReclaimableAttempts(_numNonReclaimableAttempts),
-      numReserves(_numReserves),
-      numReleases(_numReleases) {}
+      numShrinks(_numShrinks) {}
 
 std::string MemoryArbitrator::Stats::toString() const {
   return fmt::format(
-      "STATS[numRequests {} numSucceeded {} numAborted {} numFailures {} "
-      "numNonReclaimableAttempts {} numReserves {} numReleases {} "
+      "STATS[numRequests {} numAborted {} numFailures {} "
+      "numNonReclaimableAttempts {} numShrinks {} "
       "queueTime {} arbitrationTime {} reclaimTime {} shrunkMemory {} "
       "reclaimedMemory {} maxCapacity {} freeCapacity {} freeReservedCapacity {}]",
       numRequests,
-      numSucceeded,
       numAborted,
       numFailures,
       numNonReclaimableAttempts,
-      numReserves,
-      numReleases,
+      numShrinks,
       succinctMicros(queueTimeUs),
       succinctMicros(arbitrationTimeUs),
       succinctMicros(reclaimTimeUs),
@@ -368,8 +388,7 @@ MemoryArbitrator::Stats MemoryArbitrator::Stats::operator-(
   result.reclaimTimeUs = reclaimTimeUs - other.reclaimTimeUs;
   result.numNonReclaimableAttempts =
       numNonReclaimableAttempts - other.numNonReclaimableAttempts;
-  result.numReserves = numReserves - other.numReserves;
-  result.numReleases = numReleases - other.numReleases;
+  result.numShrinks = numShrinks - other.numShrinks;
   return result;
 }
 
@@ -388,8 +407,7 @@ bool MemoryArbitrator::Stats::operator==(const Stats& other) const {
              freeReservedCapacityBytes,
              reclaimTimeUs,
              numNonReclaimableAttempts,
-             numReserves,
-             numReleases) ==
+             numShrinks) ==
       std::tie(
              other.numRequests,
              other.numSucceeded,
@@ -404,8 +422,7 @@ bool MemoryArbitrator::Stats::operator==(const Stats& other) const {
              other.freeReservedCapacityBytes,
              other.reclaimTimeUs,
              other.numNonReclaimableAttempts,
-             other.numReserves,
-             other.numReleases);
+             other.numShrinks);
 }
 
 bool MemoryArbitrator::Stats::operator!=(const Stats& other) const {
@@ -434,8 +451,7 @@ bool MemoryArbitrator::Stats::operator<(const Stats& other) const {
   UPDATE_COUNTER(numReclaimedBytes);
   UPDATE_COUNTER(reclaimTimeUs);
   UPDATE_COUNTER(numNonReclaimableAttempts);
-  UPDATE_COUNTER(numReserves);
-  UPDATE_COUNTER(numReleases);
+  UPDATE_COUNTER(numShrinks);
 #undef UPDATE_COUNTER
   VELOX_CHECK(
       !((gtCount > 0) && (ltCount > 0)),
@@ -464,11 +480,20 @@ ScopedMemoryArbitrationContext::ScopedMemoryArbitrationContext(
   arbitrationCtx = &currentArbitrationCtx_;
 }
 
+ScopedMemoryArbitrationContext::ScopedMemoryArbitrationContext(
+    const MemoryArbitrationContext* contextToRestore)
+    : savedArbitrationCtx_(arbitrationCtx) {
+  if (contextToRestore != nullptr) {
+    currentArbitrationCtx_ = *contextToRestore;
+    arbitrationCtx = &currentArbitrationCtx_;
+  }
+}
+
 ScopedMemoryArbitrationContext::~ScopedMemoryArbitrationContext() {
   arbitrationCtx = savedArbitrationCtx_;
 }
 
-MemoryArbitrationContext* memoryArbitrationContext() {
+const MemoryArbitrationContext* memoryArbitrationContext() {
   return arbitrationCtx;
 }
 
@@ -505,5 +530,26 @@ void testingRunArbitration(
   // would check if the query has been aborted after finish arbitration by the
   // memory pool capacity grow path.
   static_cast<MemoryPoolImpl*>(pool)->testingCheckIfAborted();
+}
+
+ScopedReclaimedBytesRecorder::ScopedReclaimedBytesRecorder(
+    MemoryPool* pool,
+    int64_t* reclaimedBytes)
+    : pool_(pool),
+      reclaimedBytes_(reclaimedBytes),
+      reservedBytesBeforeReclaim_(pool_->reservedBytes()) {
+  VELOX_CHECK_NOT_NULL(reclaimedBytes_);
+  VELOX_CHECK_EQ(*reclaimedBytes_, 0);
+}
+
+ScopedReclaimedBytesRecorder::~ScopedReclaimedBytesRecorder() {
+  if (std::uncaught_exceptions() > 0) {
+    // NOTE: if there is an alive exception triggered by memory reclaim, then we
+    // won't set reclaimed memory bytes.
+    *reclaimedBytes_ = 0;
+    return;
+  }
+  const int64_t reservedBytesAfterReclaim = pool_->reservedBytes();
+  *reclaimedBytes_ = reservedBytesBeforeReclaim_ - reservedBytesAfterReclaim;
 }
 } // namespace facebook::velox::memory

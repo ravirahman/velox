@@ -19,7 +19,7 @@
 #include "velox/common/memory/Memory.h"
 #include "velox/connectors/hive/HiveConnector.h"
 #include "velox/connectors/hive/HiveConnectorSplit.h"
-#include "velox/dwio/dwrf/reader/DwrfReader.h"
+#include "velox/dwio/dwrf/RegisterDwrfReader.h"
 #include "velox/exec/Task.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
       "my_write_task",
       writerPlanFragment,
       /*destination=*/0,
-      std::make_shared<core::QueryCtx>(executor.get()),
+      core::QueryCtx::create(executor.get()),
       exec::Task::ExecutionMode::kParallel);
 
   // next() starts execution using the client thread. The loop pumps output
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
       "my_read_task",
       readPlanFragment,
       /*destination=*/0,
-      std::make_shared<core::QueryCtx>(executor.get()),
+      core::QueryCtx::create(executor.get()),
       exec::Task::ExecutionMode::kParallel);
 
   // Now that we have the query fragment and Task structure set up, we will

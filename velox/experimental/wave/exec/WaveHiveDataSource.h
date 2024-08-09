@@ -46,13 +46,17 @@ class WaveHiveDataSource : public WaveDataSource {
 
   void setFromDataSource(std::shared_ptr<WaveDataSource> dataSource) override;
 
-  int32_t canAdvance() override;
+  int32_t canAdvance(WaveStream& stream) override;
 
   void schedule(WaveStream& stream, int32_t maxRows) override;
 
   vector_size_t outputSize(WaveStream& stream) const override;
 
   bool isFinished() override;
+
+  std::shared_ptr<WaveSplitReader> splitReader() override {
+    return splitReader_;
+  }
 
   uint64_t getCompletedBytes() override;
 
@@ -65,7 +69,7 @@ class WaveHiveDataSource : public WaveDataSource {
  private:
   SplitReaderParams params_;
   std::shared_ptr<connector::ConnectorSplit> split_;
-  std::unique_ptr<WaveSplitReader> splitReader_;
+  std::shared_ptr<WaveSplitReader> splitReader_;
   std::shared_ptr<exec::Expr> remainingFilter_;
   dwio::common::RuntimeStatistics runtimeStats_;
   std::shared_ptr<common::MetadataFilter> metadataFilter_;

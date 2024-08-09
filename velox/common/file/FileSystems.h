@@ -57,6 +57,12 @@ class FileSystem {
   /// Returns the name of the File System
   virtual std::string name() const = 0;
 
+  /// Returns the file path without the fs scheme prefix such as "local:" prefix
+  /// for local file system.
+  virtual std::string_view extractPath(std::string_view path) {
+    VELOX_NYI();
+  }
+
   /// Returns a ReadFile handle for a given file path
   virtual std::unique_ptr<ReadFile> openFileForRead(
       std::string_view path,
@@ -101,6 +107,10 @@ class FileSystem {
 std::shared_ptr<FileSystem> getFileSystem(
     std::string_view filename,
     std::shared_ptr<const Config> config);
+
+/// Returns true if filePath is supported by any registered file system,
+/// otherwise false.
+bool isPathSupportedByRegisteredFileSystems(const std::string_view& filePath);
 
 /// FileSystems must be registered explicitly.
 /// The registration function takes two parameters:

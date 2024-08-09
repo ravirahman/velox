@@ -105,6 +105,8 @@ class ArrayDistinctTest : public FunctionBaseTest {
         {0.0, -10.0},
         {std::numeric_limits<T>::quiet_NaN(),
          std::numeric_limits<T>::quiet_NaN()},
+        {std::numeric_limits<T>::quiet_NaN(),
+         std::numeric_limits<T>::signaling_NaN()},
         {std::numeric_limits<T>::signaling_NaN(),
          std::numeric_limits<T>::signaling_NaN()},
         {std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest()},
@@ -134,10 +136,10 @@ class ArrayDistinctTest : public FunctionBaseTest {
         {0.0},
         {0.0, 10.0},
         {0.0, -10.0},
-        {std::numeric_limits<T>::quiet_NaN(),
-         std::numeric_limits<T>::quiet_NaN()},
-        {std::numeric_limits<T>::signaling_NaN(),
-         std::numeric_limits<T>::signaling_NaN()},
+        {std::numeric_limits<T>::quiet_NaN()},
+        // quiet NaN and signaling NaN are treated equal
+        {std::numeric_limits<T>::quiet_NaN()},
+        {std::numeric_limits<T>::signaling_NaN()},
         {std::numeric_limits<T>::lowest()},
         {std::nullopt},
         {1.0001, -2.0, 3.03, std::nullopt, 4.00004},
@@ -275,6 +277,23 @@ TEST_F(ArrayDistinctTest, stringArrays) {
   });
 
   testExpr(expected, "array_distinct(C0)", {array});
+}
+
+TEST_F(ArrayDistinctTest, complexTypeArrays) {
+  auto input = makeNestedArrayVectorFromJson<int32_t>({
+      "[[1, 2, 3], [1, 2], [1, 2, 3], [], [1, 2, 3], [1], [1, 2, 3], [2], []]",
+      "[[null, 2, 3], [1, 2], [1, 2, 3], [], [null, 2, 3], [1], [1, 2, 3], [2], null]",
+      "[[1, null, 3], [1, null, 3], [1, null, 3], null, [1, null, 3], [1, null, 3]]",
+  });
+
+  auto result = evaluate("array_distinct(c0)", makeRowVector({input}));
+  auto expected = makeNestedArrayVectorFromJson<int32_t>({
+      "[[1, 2, 3], [1, 2], [], [1], [2]]",
+      "[[null, 2, 3], [1, 2], [1, 2, 3], [], [1], [2], null]",
+      "[[1, null, 3], null]",
+  });
+
+  assertEqualVectors(expected, result);
 }
 
 TEST_F(ArrayDistinctTest, nonContiguousRows) {

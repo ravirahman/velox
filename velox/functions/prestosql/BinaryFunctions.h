@@ -25,6 +25,7 @@
 #include "velox/external/md5/md5.h"
 #include "velox/functions/Udf.h"
 #include "velox/functions/lib/ToHex.h"
+#include "velox/functions/lib/string/StringImpl.h"
 
 namespace facebook::velox::functions {
 
@@ -281,40 +282,33 @@ struct ToBase64Function {
   }
 };
 
-template <typename T>
+template <typename TExec>
 struct FromBase64Function {
-  VELOX_DEFINE_FUNCTION_TYPES(T);
+  VELOX_DEFINE_FUNCTION_TYPES(TExec);
 
-  FOLLY_ALWAYS_INLINE void call(
-      out_type<Varbinary>& result,
-      const arg_type<Varchar>& input) {
-    try {
-      auto inputSize = input.size();
-      result.resize(
-          encoding::Base64::calculateDecodedSize(input.data(), inputSize));
-      encoding::Base64::decode(input.data(), input.size(), result.data());
-    } catch (const encoding::Base64Exception& e) {
-      VELOX_USER_FAIL(e.what());
-    }
+  // T can be either arg_type<Varchar> or arg_type<Varbinary>. These are the
+  // same, but hard-coding one of them might be confusing.
+  template <typename T>
+  FOLLY_ALWAYS_INLINE void call(out_type<Varbinary>& result, const T& input) {
+    auto inputSize = input.size();
+    result.resize(
+        encoding::Base64::calculateDecodedSize(input.data(), inputSize));
+    encoding::Base64::decode(
+        input.data(), inputSize, result.data(), result.size());
   }
 };
 
 template <typename T>
 struct FromBase64UrlFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
-
   FOLLY_ALWAYS_INLINE void call(
       out_type<Varbinary>& result,
       const arg_type<Varchar>& input) {
-    auto inputData = input.data();
     auto inputSize = input.size();
-    bool hasPad =
-        inputSize > 0 && (*(input.end() - 1) == encoding::Base64::kBase64Pad);
     result.resize(
-        encoding::Base64::calculateDecodedSize(inputData, inputSize, hasPad));
-    hasPad = false; // calculateDecodedSize() updated inputSize to exclude pad.
+        encoding::Base64::calculateDecodedSize(input.data(), inputSize));
     encoding::Base64::decodeUrl(
-        inputData, inputSize, result.data(), result.size(), hasPad);
+        input.data(), inputSize, result.data(), result.size());
   }
 };
 
@@ -440,5 +434,32 @@ struct FromIEEE754Bits32 {
     result = folly::Endian::big(result);
   }
 };
+
+/// lpad(binary, size, padbinary) -> varbinary
+///     Left pads input to size characters with padding.  If size is
+///     less than the length of input, the result is truncated to size
+///     characters.  size must not be negative and padding must be non-empty.
+/// rpad(binary, size, padbinary) -> varbinary
+///     Right pads input to size characters with padding.  If size is
+///     less than the length of input, the result is truncated to size
+///     characters.  size must not be negative and padding must be non-empty.
+template <typename T, bool lpad>
+struct PadFunctionVarbinaryBase {
+  VELOX_DEFINE_FUNCTION_TYPES(T);
+
+  FOLLY_ALWAYS_INLINE void call(
+      out_type<Varbinary>& result,
+      const arg_type<Varbinary>& binary,
+      const arg_type<int64_t>& size,
+      const arg_type<Varbinary>& padbinary) {
+    stringImpl::pad<lpad, false /*isAscii*/>(result, binary, size, padbinary);
+  }
+};
+
+template <typename T>
+struct LPadVarbinaryFunction : public PadFunctionVarbinaryBase<T, true> {};
+
+template <typename T>
+struct RPadVarbinaryFunction : public PadFunctionVarbinaryBase<T, false> {};
 
 } // namespace facebook::velox::functions

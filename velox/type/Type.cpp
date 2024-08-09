@@ -338,9 +338,7 @@ std::string namesAndTypesToString(
 } // namespace
 
 RowType::RowType(std::vector<std::string>&& names, std::vector<TypePtr>&& types)
-    : names_{std::move(names)},
-      children_{std::move(types)},
-      parameters_{createTypeParameters(children_)} {
+    : names_{std::move(names)}, children_{std::move(types)} {
   VELOX_CHECK_EQ(
       names_.size(),
       children_.size(),
@@ -352,6 +350,17 @@ RowType::RowType(std::vector<std::string>&& names, std::vector<TypePtr>&& types)
         "Child types cannot be null: {}",
         namesAndTypesToString(names_, children_));
   }
+}
+
+RowType::~RowType() {
+  if (auto* parameters = parameters_.load()) {
+    delete parameters;
+  }
+}
+
+std::unique_ptr<std::vector<TypeParameter>> RowType::makeParameters() const {
+  return std::make_unique<std::vector<TypeParameter>>(
+      createTypeParameters(children_));
 }
 
 uint32_t RowType::size() const {
@@ -935,9 +944,14 @@ void toTypeSql(const TypePtr& type, std::ostream& out) {
 }
 
 std::string IntervalDayTimeType::valueToString(int64_t value) const {
-  static const char* kIntervalFormat = "%d %02d:%02d:%02d.%03d";
+  static const char* kIntervalFormat = "%s%lld %02d:%02d:%02d.%03d";
 
-  int64_t remainMillis = value;
+  int128_t remainMillis = value;
+  std::string sign{};
+  if (remainMillis < 0) {
+    sign = "-";
+    remainMillis = -remainMillis;
+  }
   const int64_t days = remainMillis / kMillisInDay;
   remainMillis -= days * kMillisInDay;
   const int64_t hours = remainMillis / kMillisInHour;
@@ -951,6 +965,7 @@ std::string IntervalDayTimeType::valueToString(int64_t value) const {
       buf,
       sizeof(buf),
       kIntervalFormat,
+      sign.c_str(),
       days,
       hours,
       minutes,
@@ -982,7 +997,7 @@ std::string DateType::toIso8601(int32_t days) {
   int64_t daySeconds = days * (int64_t)(86400);
   std::tm tmValue;
   VELOX_CHECK(
-      Timestamp::epochToUtc(daySeconds, tmValue),
+      Timestamp::epochToCalendarUtc(daySeconds, tmValue),
       "Can't convert days to dates: {}",
       days);
   TimestampToStringOptions options;
@@ -998,11 +1013,14 @@ std::string DateType::toIso8601(int32_t days) {
 }
 
 int32_t DateType::toDays(folly::StringPiece in) const {
-  return util::fromDateString(in.data(), in.size());
+  return toDays(in.data(), in.size());
 }
 
 int32_t DateType::toDays(const char* in, size_t len) const {
-  return util::fromDateString(in, len);
+  return util::fromDateString(in, len, util::ParseMode::kPrestoCast)
+      .thenOrThrow(folly::identity, [&](const Status& status) {
+        VELOX_USER_FAIL("{}", status.message());
+      });
 }
 
 namespace {

@@ -27,9 +27,7 @@ namespace facebook::velox::core {
 
 typedef std::string PlanNodeId;
 
-/**
- * Generic representation of InsertTable
- */
+/// Generic representation of InsertTable
 struct InsertTableHandle {
  public:
   InsertTableHandle(
@@ -160,15 +158,15 @@ class PlanNode : public ISerializable {
   /// @param addContext Optional lambda to add context for a given plan node.
   /// Receives plan node ID, indentation and std::stringstream where to append
   /// the context. Use indentation for second and subsequent lines of a
-  /// mult-line context. Do not use indentation for single-line context. Do not
+  /// multi-line context. Do not use indentation for single-line context. Do not
   /// add trailing new-line character for the last or only line of context.
   std::string toString(
       bool detailed = false,
       bool recursive = false,
-      std::function<void(
+      const std::function<void(
           const PlanNodeId& planNodeId,
           const std::string& indentation,
-          std::stringstream& stream)> addContext = nullptr) const {
+          std::stringstream& stream)>& addContext = nullptr) const {
     std::stringstream stream;
     toString(stream, detailed, recursive, 0, addContext);
     return stream.str();
@@ -211,10 +209,10 @@ class PlanNode : public ISerializable {
       bool detailed,
       bool recursive,
       size_t indentationSize,
-      std::function<void(
+      const std::function<void(
           const PlanNodeId& planNodeId,
           const std::string& indentation,
-          std::stringstream& stream)> addContext) const;
+          std::stringstream& stream)>& addContext) const;
 
   const std::string id_;
 };
@@ -912,7 +910,7 @@ class GroupIdNode : public PlanNode {
     return aggregationInputs_;
   }
 
-  const std::string& groupIdName() {
+  const std::string& groupIdName() const {
     return groupIdName_;
   }
 
@@ -1643,22 +1641,16 @@ class MergeJoinNode : public AbstractJoinNode {
       TypedExprPtr filter,
       PlanNodePtr left,
       PlanNodePtr right,
-      RowTypePtr outputType)
-      : AbstractJoinNode(
-            id,
-            joinType,
-            leftKeys,
-            rightKeys,
-            std::move(filter),
-            std::move(left),
-            std::move(right),
-            std::move(outputType)) {}
+      RowTypePtr outputType);
 
   std::string_view name() const override {
     return "MergeJoin";
   }
 
   folly::dynamic serialize() const override;
+
+  /// If merge join supports this join type.
+  static bool isSupported(core::JoinType joinType);
 
   static PlanNodePtr create(const folly::dynamic& obj, void* context);
 };
@@ -1667,9 +1659,10 @@ class MergeJoinNode : public AbstractJoinNode {
 /// exec::NestedLoopJoinProbe and exec::NestedLoopJoinBuild. A separate pipeline
 /// is produced for the build side when generating exec::Operators.
 ///
-/// Nested loop join supports both equal and non-equal joins. Expressions
+/// Nested loop join (NLJ) supports both equal and non-equal joins. Expressions
 /// specified in joinCondition are evaluated on every combination of left/right
-/// tuple, to emit result.
+/// tuple, to emit result. Results are emitted following the same input order of
+/// probe rows for inner and left joins, for each thread of execution.
 ///
 /// To create Cartesian product of the left/right's output, use the constructor
 /// without `joinType` and `joinCondition` parameter.
@@ -1711,6 +1704,9 @@ class NestedLoopJoinNode : public PlanNode {
 
   folly::dynamic serialize() const override;
 
+  /// If nested loop join supports this join type.
+  static bool isSupported(core::JoinType joinType);
+
   static PlanNodePtr create(const folly::dynamic& obj, void* context);
 
  private:
@@ -1741,6 +1737,15 @@ class OrderByNode : public PlanNode {
         sortingKeys.size(),
         sortingOrders.size(),
         "Number of sorting keys and sorting orders in OrderBy must be the same");
+    // Reject duplicate sorting keys.
+    std::unordered_set<std::string> uniqueKeys;
+    for (const auto& sortKey : sortingKeys) {
+      VELOX_USER_CHECK_NOT_NULL(sortKey, "Sorting key cannot be null");
+      VELOX_USER_CHECK(
+          uniqueKeys.insert(sortKey->name()).second,
+          "Duplicate sorting keys are not allowed: {}",
+          sortKey->name());
+    }
   }
 
   const std::vector<FieldAccessTypedExprPtr>& sortingKeys() const {

@@ -116,20 +116,19 @@ int64_t WriterContext::getMemoryUsage(
     const MemoryUsageCategory& category) const {
   switch (category) {
     case MemoryUsageCategory::DICTIONARY:
-      return dictionaryPool_->currentBytes();
+      return dictionaryPool_->usedBytes();
     case MemoryUsageCategory::OUTPUT_STREAM:
-      return outputStreamPool_->currentBytes();
+      return outputStreamPool_->usedBytes();
     case MemoryUsageCategory::GENERAL:
-      return generalPool_->currentBytes();
+      return generalPool_->usedBytes();
     default:
       VELOX_FAIL("Unreachable: {}", static_cast<int>(category));
   }
 }
 
 int64_t WriterContext::getTotalMemoryUsage() const {
-  return getMemoryUsage(MemoryUsageCategory::OUTPUT_STREAM) +
-      getMemoryUsage(MemoryUsageCategory::DICTIONARY) +
-      getMemoryUsage(MemoryUsageCategory::GENERAL);
+  return generalPool_->usedBytes() + dictionaryPool_->usedBytes() +
+      outputStreamPool_->usedBytes();
 }
 
 int64_t WriterContext::availableMemoryReservation() const {
@@ -138,10 +137,20 @@ int64_t WriterContext::availableMemoryReservation() const {
       generalPool_->availableReservation();
 }
 
-void WriterContext::releaseMemoryReservation() {
+int64_t WriterContext::releasableMemoryReservation() const {
+  return generalPool_->parent()->releasableReservation();
+}
+
+int64_t WriterContext::releaseMemoryReservation() {
+  const auto* aggregatePool = dictionaryPool_->parent();
+  const auto beforeTotalReservation = aggregatePool->reservedBytes();
   dictionaryPool_->release();
   outputStreamPool_->release();
   generalPool_->release();
+  const auto releasedMemory =
+      beforeTotalReservation - aggregatePool->reservedBytes();
+  VELOX_CHECK_GE(releasedMemory, 0);
+  return releasedMemory;
 }
 
 void WriterContext::abort() {

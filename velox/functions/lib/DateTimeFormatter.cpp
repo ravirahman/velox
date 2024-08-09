@@ -16,7 +16,6 @@
 
 #include "velox/functions/lib/DateTimeFormatter.h"
 #include <folly/String.h>
-#include <velox/common/base/Exceptions.h>
 #include <charconv>
 #include <cstring>
 #include <stdexcept>
@@ -154,7 +153,7 @@ static std::
             // Lower case.
             {"jan", {"uary", 1}},
             {"feb", {"ruary", 2}},
-            {"mar", {"rch", 3}},
+            {"mar", {"ch", 3}},
             {"apr", {"il", 4}},
             {"may", {"", 5}},
             {"jun", {"e", 6}},
@@ -168,7 +167,7 @@ static std::
             // Upper case.
             {"JAN", {"UARY", 1}},
             {"FEB", {"RUARY", 2}},
-            {"MAR", {"RCH", 3}},
+            {"MAR", {"CH", 3}},
             {"APR", {"IL", 4}},
             {"MAY", {"", 5}},
             {"JUN", {"E", 6}},
@@ -295,18 +294,16 @@ bool specAllowsPlusSign(DateTimeFormatSpecifier s, bool specifierNext) {
   }
 }
 
-void parseFail(
-    const std::string_view& input,
-    const char* cur,
-    const char* end,
-    const bool failOnError) {
-  if (failOnError) {
-    VELOX_DCHECK_LE(cur, end);
-    VELOX_USER_FAIL(
-        "Invalid date format: '{}' is malformed at '{}'",
-        input,
-        std::string_view(cur, end - cur));
+Expected<DateTimeResult>
+parseFail(const std::string_view& input, const char* cur, const char* end) {
+  VELOX_DCHECK_LE(cur, end);
+  if (threadSkipErrorDetails()) {
+    return folly::makeUnexpected(Status::UserError());
   }
+  return folly::makeUnexpected(Status::UserError(
+      "Invalid date format: '{}' is malformed at '{}'",
+      input,
+      std::string_view(cur, end - cur)));
 }
 
 // Joda only supports parsing a few three-letter prefixes. The list is available
@@ -323,14 +320,14 @@ int64_t parseTimezone(const char* cur, const char* end, Date& date) {
       static std::unordered_map<std::string_view, int64_t> defaultTzNames{
           {"UTC", 0},
           {"GMT", 0},
-          {"EST", util::getTimeZoneID("America/New_York")},
-          {"EDT", util::getTimeZoneID("America/New_York")},
-          {"CST", util::getTimeZoneID("America/Chicago")},
-          {"CDT", util::getTimeZoneID("America/Chicago")},
-          {"MST", util::getTimeZoneID("America/Denver")},
-          {"MDT", util::getTimeZoneID("America/Denver")},
-          {"PST", util::getTimeZoneID("America/Los_Angeles")},
-          {"PDT", util::getTimeZoneID("America/Los_Angeles")},
+          {"EST", tz::getTimeZoneID("America/New_York")},
+          {"EDT", tz::getTimeZoneID("America/New_York")},
+          {"CST", tz::getTimeZoneID("America/Chicago")},
+          {"CDT", tz::getTimeZoneID("America/Chicago")},
+          {"MST", tz::getTimeZoneID("America/Denver")},
+          {"MDT", tz::getTimeZoneID("America/Denver")},
+          {"PST", tz::getTimeZoneID("America/Los_Angeles")},
+          {"PDT", tz::getTimeZoneID("America/Los_Angeles")},
       };
 
       auto it = defaultTzNames.find(std::string_view(cur, 3));
@@ -365,8 +362,7 @@ int64_t parseTimezoneOffset(const char* cur, const char* end, Date& date) {
         if (std::strncmp(cur + 1, "00:00", 5) == 0) {
           date.timezoneId = 0;
         } else {
-          date.timezoneId =
-              util::getTimeZoneID(std::string_view(cur, 6), false);
+          date.timezoneId = tz::getTimeZoneID(std::string_view(cur, 6), false);
           if (date.timezoneId == -1) {
             return -1;
           }
@@ -384,7 +380,7 @@ int64_t parseTimezoneOffset(const char* cur, const char* end, Date& date) {
           // thread_local buffer to prevent extra allocations.
           std::memcpy(&timezoneBuffer[0], cur, 3);
           std::memcpy(&timezoneBuffer[4], cur + 3, 2);
-          date.timezoneId = util::getTimeZoneID(timezoneBuffer, false);
+          date.timezoneId = tz::getTimeZoneID(timezoneBuffer, false);
           if (date.timezoneId == -1) {
             return -1;
           }
@@ -402,7 +398,7 @@ int64_t parseTimezoneOffset(const char* cur, const char* end, Date& date) {
           // buffer to prevent extra allocations.
           std::memcpy(&timezoneBuffer[0], cur, 3);
           std::memcpy(&timezoneBuffer[4], defaultTrailingOffset, 2);
-          date.timezoneId = util::getTimeZoneID(timezoneBuffer, false);
+          date.timezoneId = tz::getTimeZoneID(timezoneBuffer, false);
           if (date.timezoneId == -1) {
             return -1;
           }
@@ -529,6 +525,54 @@ std::string formatFractionOfSecond(
 
   toAdd[minRepresentDigits] = '\0';
   return toAdd;
+}
+
+int32_t appendTimezoneOffset(int64_t offset, char* result) {
+  int pos = 0;
+  if (offset >= 0) {
+    result[pos++] = '+';
+  } else {
+    result[pos++] = '-';
+    offset = -offset;
+  }
+
+  const auto hours = offset / 60 / 60;
+  if (hours < 10) {
+    result[pos++] = '0';
+    result[pos++] = char(hours + '0');
+  } else {
+    result[pos++] = char(hours / 10 + '0');
+    result[pos++] = char(hours % 10 + '0');
+  }
+
+  result[pos++] = ':';
+
+  const auto minutes = (offset / 60) % 60;
+  if LIKELY (minutes == 0) {
+    result[pos++] = '0';
+    result[pos++] = '0';
+  } else if (minutes < 10) {
+    result[pos++] = '0';
+    result[pos++] = char(minutes + '0');
+  } else {
+    result[pos++] = char(minutes / 10 + '0');
+    result[pos++] = char(minutes % 10 + '0');
+  }
+
+  const auto seconds = offset % 60;
+  if (seconds > 0) {
+    result[pos++] = ':';
+
+    if (seconds < 10) {
+      result[pos++] = '0';
+      result[pos++] = char(seconds + '0');
+    } else {
+      result[pos++] = char(seconds / 10 + '0');
+      result[pos++] = char(seconds % 10 + '0');
+    }
+  }
+
+  return pos;
 }
 
 // According to DateTimeFormatSpecifier enum class
@@ -954,8 +998,7 @@ int32_t parseFromPattern(
 
 } // namespace
 
-uint32_t DateTimeFormatter::maxResultSize(
-    const date::time_zone* timezone) const {
+uint32_t DateTimeFormatter::maxResultSize(const tz::TimeZone* timezone) const {
   uint32_t size = 0;
   for (const auto& token : tokens_) {
     if (token.type == DateTimeToken::Type::kLiteral) {
@@ -1012,8 +1055,16 @@ uint32_t DateTimeFormatter::maxResultSize(
         size += std::max(
             token.pattern.minRepresentDigits, timezone->name().length());
         break;
-      // Not supported.
       case DateTimeFormatSpecifier::TIMEZONE_OFFSET_ID:
+        if (token.pattern.minRepresentDigits != 2) {
+          VELOX_UNSUPPORTED(
+              "Date format specifier is not supported: {} ({})",
+              getSpecifierName(token.pattern.specifier),
+              token.pattern.minRepresentDigits);
+        }
+        size += 9;
+        break;
+      // Not supported.
       case DateTimeFormatSpecifier::WEEK_YEAR:
       case DateTimeFormatSpecifier::WEEK_OF_WEEK_YEAR:
       default:
@@ -1027,15 +1078,19 @@ uint32_t DateTimeFormatter::maxResultSize(
 
 int32_t DateTimeFormatter::format(
     const Timestamp& timestamp,
-    const date::time_zone* timezone,
+    const tz::TimeZone* timezone,
     const uint32_t maxResultSize,
     char* result,
     bool allowOverflow) const {
+  int64_t offset = 0;
   Timestamp t = timestamp;
   if (timezone != nullptr) {
+    const auto utcSeconds = timestamp.getSeconds();
     t.toTimezone(*timezone);
+
+    offset = t.getSeconds() - utcSeconds;
   }
-  const auto timePoint = t.toTimePoint(allowOverflow);
+  const auto timePoint = t.toTimePointMs(allowOverflow);
   const auto daysTimePoint = date::floor<date::days>(timePoint);
 
   const auto durationInTheDay = date::make_time(timePoint - daysTimePoint);
@@ -1249,9 +1304,19 @@ int32_t DateTimeFormatter::format(
           result += piece.length();
         } break;
 
-        case DateTimeFormatSpecifier::TIMEZONE_OFFSET_ID:
-          // TODO: implement timezone offset id formatting, need a map from full
-          // name to offset time
+        case DateTimeFormatSpecifier::TIMEZONE_OFFSET_ID: {
+          // Zone: 'Z' outputs offset without a colon, 'ZZ' outputs the offset
+          // with a colon, 'ZZZ' or more outputs the zone id.
+          // TODO Add support for 'Z' and 'ZZZ'.
+          if (token.pattern.minRepresentDigits != 2) {
+            VELOX_UNSUPPORTED(
+                "format is not supported for specifier {} ({})",
+                getSpecifierName(token.pattern.specifier),
+                token.pattern.minRepresentDigits);
+          }
+          result += appendTimezoneOffset(offset, result);
+          break;
+        }
         case DateTimeFormatSpecifier::WEEK_YEAR:
         case DateTimeFormatSpecifier::WEEK_OF_WEEK_YEAR:
         default:
@@ -1266,9 +1331,8 @@ int32_t DateTimeFormatter::format(
   return resultSize;
 }
 
-std::optional<DateTimeResult> DateTimeFormatter::parse(
-    const std::string_view& input,
-    const bool failOnError) const {
+Expected<DateTimeResult> DateTimeFormatter::parse(
+    const std::string_view& input) const {
   Date date;
   const char* cur = input.data();
   const char* end = cur + input.size();
@@ -1279,8 +1343,7 @@ std::optional<DateTimeResult> DateTimeFormatter::parse(
       case DateTimeToken::Type::kLiteral:
         if (tok.literal.size() > end - cur ||
             std::memcmp(cur, tok.literal.data(), tok.literal.size()) != 0) {
-          parseFail(input, cur, end, failOnError);
-          return std::nullopt;
+          return parseFail(input, cur, end);
         }
         cur += tok.literal.size();
         break;
@@ -1289,14 +1352,12 @@ std::optional<DateTimeResult> DateTimeFormatter::parse(
             tokens_[i + 1].type == DateTimeToken::Type::kPattern) {
           if (parseFromPattern(
                   tok.pattern, input, cur, end, date, true, type_) == -1) {
-            parseFail(input, cur, end, failOnError);
-            return std::nullopt;
+            return parseFail(input, cur, end);
           }
         } else {
           if (parseFromPattern(
                   tok.pattern, input, cur, end, date, false, type_) == -1) {
-            parseFail(input, cur, end, failOnError);
-            return std::nullopt;
+            return parseFail(input, cur, end);
           }
         }
         break;
@@ -1305,8 +1366,7 @@ std::optional<DateTimeResult> DateTimeFormatter::parse(
 
   // Ensure all input was consumed.
   if (cur < end) {
-    parseFail(input, cur, end, failOnError);
-    return std::nullopt;
+    return parseFail(input, cur, end);
   }
 
   // Era is BC and year of era is provided
@@ -1323,32 +1383,32 @@ std::optional<DateTimeResult> DateTimeFormatter::parse(
   // Ensure all day of month values are valid for ending month value
   for (int i = 0; i < date.dayOfMonthValues.size(); i++) {
     if (!util::isValidDate(date.year, date.month, date.dayOfMonthValues[i])) {
-      if (!failOnError) {
-        return std::nullopt;
+      if (threadSkipErrorDetails()) {
+        return folly::makeUnexpected(Status::UserError());
       }
-      VELOX_USER_FAIL(
+      return folly::makeUnexpected(Status::UserError(
           "Value {} for dayOfMonth must be in the range [1,{}] "
           "for year {} and month {}.",
           date.dayOfMonthValues[i],
           util::getMaxDayOfMonth(date.year, date.month),
           date.year,
-          date.month);
+          date.month));
     }
   }
 
   // Ensure all day of year values are valid for ending year value
   for (int i = 0; i < date.dayOfYearValues.size(); i++) {
     if (!util::isValidDayOfYear(date.year, date.dayOfYearValues[i])) {
-      if (!failOnError) {
-        return std::nullopt;
+      if (threadSkipErrorDetails()) {
+        return folly::makeUnexpected(Status::UserError());
       }
-      VELOX_USER_FAIL(
+      return folly::makeUnexpected(Status::UserError(
           "Value {} for dayOfMonth must be in the range [1,{}] "
           "for year {} and month {}.",
           date.dayOfYearValues[i],
           util::isLeapYear(date.year) ? 366 : 365,
           date.year,
-          date.month);
+          date.month));
     }
   }
 
@@ -1367,10 +1427,7 @@ std::optional<DateTimeResult> DateTimeFormatter::parse(
   }
   if (!status.ok()) {
     VELOX_DCHECK(status.isUserError());
-    if (!failOnError) {
-      return std::nullopt;
-    }
-    VELOX_USER_FAIL(status.message());
+    return folly::makeUnexpected(status);
   }
 
   int64_t microsSinceMidnight =

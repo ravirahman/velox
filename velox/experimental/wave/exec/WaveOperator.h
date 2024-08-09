@@ -53,6 +53,10 @@ class WaveOperator {
     return isExpanding_;
   }
 
+  virtual bool isSource() const {
+    return false;
+  }
+
   virtual bool isStreaming() const = 0;
 
   virtual void enqueue(WaveVectorPtr) {
@@ -74,8 +78,8 @@ class WaveOperator {
   /// Returns how many rows of output are available from 'this'. Source
   /// operators and cardinality increasing operators must return a correct
   /// answer if they are ready to produce data. Others should return 0.
-  virtual int32_t canAdvance() {
-    return 0;
+  virtual AdvanceResult canAdvance(WaveStream& stream) {
+    return {.numRows = 0};
   }
 
   /// Adds processing for 'this' to 'stream'. If 'maxRows' is given,
@@ -93,12 +97,17 @@ class WaveOperator {
     VELOX_FAIL("Override for source or blocking operator");
   }
 
-  virtual std::string toString() const = 0;
+  virtual bool isSink() const {
+    return false;
+  }
 
-  void definesSubfields(
+  virtual std::string toString() const;
+
+  AbstractOperand* definesSubfield(
       CompileState& state,
       const TypePtr& type,
-      const std::string& parentPath = "");
+      const std::string& parentPath = "",
+      bool sourceNullable = false);
 
   /// Returns the operand if this is defined by 'this'.
   AbstractOperand* defines(Value value) {
@@ -107,6 +116,11 @@ class WaveOperator {
       return nullptr;
     }
     return it->second;
+  }
+
+  /// Marks 'operand' as defined here.
+  void defined(Value value, AbstractOperand* op) {
+    defines_[value] = op;
   }
 
   void setDriver(WaveDriver* driver) {
@@ -124,12 +138,16 @@ class WaveOperator {
     return outputIds_;
   }
 
+  void addOutputId(OperandId id) {
+    outputIds_.add(id);
+  }
+
   // The set of output operands that must have arrived for there to be a result.
   virtual const OperandSet& syncSet() const {
     return outputIds_;
   }
 
-  /// Called once on each Operator, fiest to last, after no more
+  /// Called once on each Operator, first to last, after no more
   /// Operators will be added to the WaveDriver plan. Can be used for
   /// e.g. making executable images of Programs since their content
   /// and dependences will no longer change.
@@ -198,6 +216,18 @@ class WaveOperator {
   // operands etc. referenced from these.  This does not include buffers for
   // intermediate results.
   std::vector<WaveBufferPtr> executableMemory_;
+};
+
+class WaveSourceOperator : public WaveOperator {
+ public:
+  WaveSourceOperator(
+      CompileState& state,
+      const RowTypePtr& outputType,
+      const std::string& planNodeId)
+      : WaveOperator(state, outputType, planNodeId) {}
+  bool isSource() const override {
+    return true;
+  }
 };
 
 } // namespace facebook::velox::wave

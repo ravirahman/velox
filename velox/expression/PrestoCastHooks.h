@@ -27,13 +27,20 @@ class PrestoCastHooks : public CastHooks {
   explicit PrestoCastHooks(const core::QueryConfig& config);
 
   // Uses the default implementation of 'castFromDateString'.
-  Timestamp castStringToTimestamp(const StringView& view) const override;
+  Expected<Timestamp> castStringToTimestamp(
+      const StringView& view) const override;
 
   // Uses standard cast mode to cast from string to date.
-  int32_t castStringToDate(const StringView& dateString) const override;
+  Expected<int32_t> castStringToDate(
+      const StringView& dateString) const override;
 
-  // Follows 'isLegacyCast' config.
-  bool legacy() const override;
+  // Allows casting 'NaN', 'Infinity', and '-Infinity' to real, but not 'Inf' or
+  // these strings with different letter cases.
+  Expected<float> castStringToReal(const StringView& data) const override;
+
+  // Allows casting 'NaN', 'Infinity', and '-Infinity' to double, but not 'Inf'
+  // or these strings with different letter cases.
+  Expected<double> castStringToDouble(const StringView& data) const override;
 
   // Returns the input as is.
   StringView removeWhiteSpaces(const StringView& view) const override;
@@ -41,8 +48,11 @@ class PrestoCastHooks : public CastHooks {
   // Returns cast options following 'isLegacyCast' and session timezone.
   const TimestampToStringOptions& timestampToStringOptions() const override;
 
-  // Returns false.
-  bool truncate() const override;
+  bool truncate() const override {
+    return false;
+  }
+
+  PolicyType getPolicy() const override;
 
  private:
   const bool legacyCast_;

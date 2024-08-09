@@ -64,10 +64,35 @@ FunctionSignatureMap getFunctionSignatures() {
   return result;
 }
 
+FunctionSignatureMap getVectorFunctionSignatures() {
+  FunctionSignatureMap result;
+  populateVectorFunctionSignatures(result);
+  return result;
+}
+
 void clearFunctionRegistry() {
   exec::mutableSimpleFunctions().clearRegistry();
   exec::vectorFunctionFactories().withWLock(
       [](auto& functionMap) { functionMap.clear(); });
+}
+
+std::optional<bool> isDeterministic(const std::string& functionName) {
+  const auto simpleFunctions =
+      exec::simpleFunctions().getFunctionSignaturesAndMetadata(functionName);
+  const auto metadata = exec::getVectorFunctionMetadata(functionName);
+  if (simpleFunctions.empty() && !metadata.has_value()) {
+    return std::nullopt;
+  }
+
+  for (const auto& [metadata, _] : simpleFunctions) {
+    if (!metadata.deterministic) {
+      return false;
+    }
+  }
+  if (metadata.has_value() && !metadata.value().deterministic) {
+    return false;
+  }
+  return true;
 }
 
 TypePtr resolveFunction(

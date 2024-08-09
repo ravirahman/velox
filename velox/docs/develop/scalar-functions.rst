@@ -332,7 +332,7 @@ properties and using it when processing inputs.
   struct HourFunction {
     VELOX_DEFINE_FUNCTION_TYPES(TExec);
 
-    const date::time_zone* timeZone_ = nullptr;
+    const tz::TimeZone* timeZone_ = nullptr;
 
     FOLLY_ALWAYS_INLINE void initialize(
         const std::vector<TypePtr>& inputTypes,
@@ -362,7 +362,7 @@ individual rows.
   struct DateTruncFunction {
     VELOX_DEFINE_FUNCTION_TYPES(TExec);
 
-    const date::time_zone* timeZone_ = nullptr;
+    const tz::TimeZone* timeZone_ = nullptr;
     std::optional<DateTimeUnit> unit_;
 
     FOLLY_ALWAYS_INLINE void initialize(
@@ -543,7 +543,10 @@ Vector Functions
 
 Simple functions process a single row and produce a single value as a result.
 Vector functions process a batch or rows and produce a vector of results.
-Some of the defining features of these functions are:
+When implementing a function, simple function is preferred unless the implementation
+of vector function provides a significant performance gain which can be demonstrated
+with a benchmark.
+Some of the defining features of vector functions are:
 
 - take vectors as inputs and produce vectors as a result;
 - have access to vector encodings and metadata;
@@ -763,8 +766,8 @@ and eliminate the overhead of calling DecodedVector::valueAt template.
 .. code-block:: c++
 
     if (base->isIdentityMapping() && exp->isIdentityMapping()) {
-      auto baseValues = base->values<double>();
-      auto expValues = exp->values<double>();
+      auto baseValues = base->data<double>();
+      auto expValues = exp->data<double>();
       rows.applyToSelected([&](int row) {
         rawResults[row] = std::pow(baseValues[row], expValues[row]);
       });
@@ -781,13 +784,13 @@ exponent.
 .. code-block:: c++
 
     if (base->isIdentityMapping() && exp->isIdentityMapping()) {
-      auto baseValues = base->values<double>();
-      auto expValues = exp->values<double>();
+      auto baseValues = base->data<double>();
+      auto expValues = exp->data<double>();
       rows.applyToSelected([&](int row) {
         rawResults[row] = std::pow(baseValues[row], expValues[row]);
       });
     } else if (base->isIdentityMapping() && exp->isConstantMapping()) {
-      auto baseValues = base->values<double>();
+      auto baseValues = base->data<double>();
       auto expValue = exp->valueAt<double>(0);
       rows.applyToSelected([&](int row) {
         rawResults[row] = std::pow(baseValues[row], expValue);

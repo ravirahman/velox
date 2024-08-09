@@ -26,6 +26,9 @@
 
 namespace facebook::velox::wave {
 
+/// Converts an array of flags to an array of indices of set flags. The first
+/// index is given by 'start'. The number of indices is returned in 'size', i.e.
+/// this is 1 + the index of the last set flag.
 template <
     typename T,
     int32_t blockSize,
@@ -60,6 +63,49 @@ boolBlockToIndices(Getter getter, T start, T* indices, void* shmem, T& size) {
   }
   if (threadIdx.x == 0) {
     size = aggregate;
+  }
+  __syncthreads();
+}
+
+inline int32_t __device__ __host__ bool256ToIndicesSize() {
+  return sizeof(typename cub::WarpScan<uint16_t>::TempStorage) +
+      33 * sizeof(uint16_t);
+}
+
+constexpr int32_t kWarpThreads = 1 << CUB_LOG_WARP_THREADS(0);
+
+/// Returns indices of set bits for 256 one byte flags. 'getter8' is
+/// invoked for 8 flags at a time, with the ordinal of the 8 byte
+/// flags word as argument, so that an index of 1 means flags
+/// 8..15. The indices start at 'start' and last index + 1 is
+/// returned in 'size'.
+template <typename T, typename Getter8>
+__device__ inline void
+bool256ToIndices(Getter8 getter8, T start, T* indices, T& size, char* smem) {
+  using Scan = cub::WarpScan<uint16_t>;
+  auto* smem16 = reinterpret_cast<uint16_t*>(smem);
+  int32_t group = threadIdx.x / 8;
+  uint64_t bits = getter8(group) & 0x0101010101010101;
+  if ((threadIdx.x & 7) == 0) {
+    smem16[group] = __popcll(bits);
+  }
+  __syncthreads();
+  if (threadIdx.x < 32) {
+    auto* temp = reinterpret_cast<typename Scan::TempStorage*>((smem + 72));
+    uint16_t data = smem16[threadIdx.x];
+    uint16_t result;
+    Scan(*temp).ExclusiveSum(data, result);
+    smem16[threadIdx.x] = result;
+    if (threadIdx.x == 31) {
+      size = data + result;
+    }
+  }
+  __syncthreads();
+  int32_t tidInGroup = threadIdx.x & 7;
+  if (bits & (1UL << (tidInGroup * 8))) {
+    int32_t base =
+        smem16[group] + __popcll(bits & lowMask<uint64_t>(tidInGroup * 8));
+    indices[base] = threadIdx.x + start;
   }
   __syncthreads();
 }
@@ -236,6 +282,91 @@ void __device__ partitionRows(
     partitionedRows[keyStart + ranks[i]] = i;
   }
   __syncthreads();
+}
+
+namespace detail {
+inline __device__ bool isLastInWarp() {
+  return (threadIdx.x & (kWarpThreads - 1)) == (kWarpThreads - 1);
+}
+} // namespace detail
+
+/// Returns the block wide exclusive sum (sum of 'input' for all
+/// lanes below threadIdx.x). If 'total' is non-nullptr, the block
+/// wide sum is returned in '*total'. 'temp' must have
+/// exclusiveSumTempSize() writable bytes aligned for T.
+template <typename T, int32_t kBlockSize>
+inline __device__ T exclusiveSum(T input, T* total, T* temp) {
+  constexpr int32_t kNumWarps = kBlockSize / kWarpThreads;
+  using Scan = cub::WarpScan<T>;
+  T sum;
+  Scan(*reinterpret_cast<typename Scan::TempStorage*>(temp))
+      .ExclusiveSum(input, sum);
+  if (kBlockSize == kWarpThreads) {
+    if (total) {
+      if (threadIdx.x == kWarpThreads - 1) {
+        *total = input + sum;
+      }
+      __syncthreads();
+    }
+    return sum;
+  }
+  if (detail::isLastInWarp()) {
+    temp[threadIdx.x / kWarpThreads] = input + sum;
+  }
+  __syncthreads();
+  using InnerScan = cub::WarpScan<T, kNumWarps>;
+  T warpSum = threadIdx.x < kNumWarps ? temp[threadIdx.x] : 0;
+  T blockSum;
+  InnerScan(*reinterpret_cast<typename InnerScan::TempStorage*>(temp))
+      .ExclusiveSum(warpSum, blockSum);
+  if (threadIdx.x < kNumWarps) {
+    temp[threadIdx.x] = blockSum;
+    if (total && threadIdx.x == kNumWarps - 1) {
+      *total = warpSum + blockSum;
+    }
+  }
+  __syncthreads();
+  return sum + temp[threadIdx.x / kWarpThreads];
+}
+
+/// Returns the block wide inclusive sum (sum of 'input' for all
+/// lanes below threadIdx.x). 'temp' must have
+/// exclusiveSumTempSize() writable bytes aligned for T. '*total' is set to the
+/// TB-wide total if 'total' is not nullptr.
+template <typename T, int32_t kBlockSize>
+inline __device__ T inclusiveSum(T input, T* total, T* temp) {
+  constexpr int32_t kNumWarps = kBlockSize / kWarpThreads;
+  using Scan = cub::WarpScan<T>;
+  T sum;
+  Scan(*reinterpret_cast<typename Scan::TempStorage*>(temp))
+      .InclusiveSum(input, sum);
+  if (kBlockSize <= kWarpThreads) {
+    if (total != nullptr) {
+      if (threadIdx.x == kBlockSize - 1) {
+        *total = sum;
+      }
+      __syncthreads();
+    }
+    return sum;
+  }
+  if (detail::isLastInWarp()) {
+    temp[threadIdx.x / kWarpThreads] = sum;
+  }
+  __syncthreads();
+  constexpr int32_t kInnerWidth = kNumWarps < 2 ? 2 : kNumWarps;
+  using InnerScan = cub::WarpScan<T, kInnerWidth>;
+  T warpSum = threadIdx.x < kInnerWidth ? temp[threadIdx.x] : 0;
+  T blockSum;
+  InnerScan(*reinterpret_cast<typename InnerScan::TempStorage*>(temp))
+      .ExclusiveSum(warpSum, blockSum);
+  if (threadIdx.x < kInnerWidth) {
+    temp[threadIdx.x] = blockSum;
+  }
+  if (total != nullptr && threadIdx.x == kInnerWidth - 1) {
+    *total = blockSum + warpSum;
+  }
+  __syncthreads();
+  return sum + temp[threadIdx.x / kWarpThreads];
 }
 
 } // namespace facebook::velox::wave

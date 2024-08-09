@@ -25,6 +25,16 @@ void registerVeloxMetrics() {
   // limit if enforced.
   DEFINE_METRIC(kMetricDriverYieldCount, facebook::velox::StatType::COUNT);
 
+  // Tracks driver queue latency in range of [0, 10s] with 20 buckets and
+  // reports P50, P90, P99, and P100.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricDriverQueueTimeMs, 500, 0, 10'000, 50, 90, 99, 100);
+
+  // Tracks driver execution latency in range of [0, 30s] with 30 buckets and
+  // reports P50, P90, P99, and P100.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricDriverExecTimeMs, 1'000, 0, 30'000, 50, 90, 99, 100);
+
   /// ================== Cache Counters =================
 
   // Tracks hive handle generation latency in range of [0, 100s] and reports
@@ -45,6 +55,215 @@ void registerVeloxMetrics() {
   // reports P50, P90, P99, and P100.
   DEFINE_HISTOGRAM_METRIC(
       kMetricCacheShrinkTimeMs, 10'000, 0, 100'000, 50, 90, 99, 100);
+
+  /// ================== Memory Allocator Counters =================
+
+  // Number of bytes currently mapped in MemoryAllocator. These bytes represent
+  // the bytes that are either currently being allocated or were in the past
+  // allocated, not yet been returned back to the operating system, in the
+  // form of 'Allocation' or 'ContiguousAllocation'.
+  DEFINE_METRIC(kMetricMappedMemoryBytes, facebook::velox::StatType::AVG);
+
+  // Number of bytes currently allocated (used) from MemoryAllocator in the form
+  // of 'Allocation' or 'ContiguousAllocation'.
+  DEFINE_METRIC(kMetricAllocatedMemoryBytes, facebook::velox::StatType::AVG);
+
+  // Number of bytes currently mapped in MmapAllocator, in the form of
+  // 'ContiguousAllocation'.
+  //
+  // NOTE: This applies only to MmapAllocator
+  DEFINE_METRIC(kMetricMmapExternalMappedBytes, facebook::velox::StatType::AVG);
+
+  // Number of bytes currently allocated from MmapAllocator directly from raw
+  // allocateBytes() interface, and internally allocated by malloc. Only small
+  // chunks of memory are delegated to malloc.
+  //
+  // NOTE: This applies only to MmapAllocator
+  DEFINE_METRIC(kMetricMmapDelegatedAllocBytes, facebook::velox::StatType::AVG);
+
+  /// ================== AsyncDataCache Counters =================
+
+  // Max possible age of AsyncDataCache and SsdCache entries since the raw file
+  // was opened to load the cache.
+  DEFINE_METRIC(kMetricCacheMaxAgeSecs, facebook::velox::StatType::AVG);
+
+  // Total number of cache entries.
+  DEFINE_METRIC(kMetricMemoryCacheNumEntries, facebook::velox::StatType::AVG);
+
+  // Total number of cache entries that do not cache anything.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumEmptyEntries, facebook::velox::StatType::AVG);
+
+  // Total number of cache entries that are pinned for shared access.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumSharedEntries, facebook::velox::StatType::AVG);
+
+  // Total number of cache entries that are pinned for exclusive access.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumExclusiveEntries, facebook::velox::StatType::AVG);
+
+  // Total number of cache entries that are being or have been prefetched but
+  // have not been hit.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumPrefetchedEntries, facebook::velox::StatType::AVG);
+
+  // Total number of bytes of the cached data that is much smaller than
+  // kTinyDataSize.
+  DEFINE_METRIC(
+      kMetricMemoryCacheTotalTinyBytes, facebook::velox::StatType::AVG);
+
+  // Total number of bytes of the cached data excluding
+  // 'kMetricMemoryCacheTotalTinyBytes'.
+  DEFINE_METRIC(
+      kMetricMemoryCacheTotalLargeBytes, facebook::velox::StatType::AVG);
+
+  // Total unused capacity bytes in 'kMetricMemoryCacheTotalTinyBytes'.
+  DEFINE_METRIC(
+      kMetricMemoryCacheTotalTinyPaddingBytes, facebook::velox::StatType::AVG);
+
+  // Total unused capacity bytes in 'kMetricMemoryCacheTotalLargeBytes'.
+  DEFINE_METRIC(
+      kMetricMemoryCacheTotalLargePaddingBytes, facebook::velox::StatType::AVG);
+
+  // Total bytes of cache entries in prefetch state.
+  DEFINE_METRIC(
+      kMetricMemoryCacheTotalPrefetchBytes, facebook::velox::StatType::AVG);
+
+  // Sum of scores of evicted entries. This serves to infer an average lifetime
+  // for entries in cache.
+  DEFINE_METRIC(
+      kMetricMemoryCacheSumEvictScore, facebook::velox::StatType::SUM);
+
+  // Number of hits (saved IO) since last counter retrieval. The first hit to a
+  // prefetched entry does not count.
+  DEFINE_METRIC(kMetricMemoryCacheNumHits, facebook::velox::StatType::SUM);
+
+  // Amount of hit bytes (saved IO) since last counter retrieval. The first hit
+  // to a prefetched entry does not count.
+  DEFINE_METRIC(kMetricMemoryCacheHitBytes, facebook::velox::StatType::SUM);
+
+  // Number of new entries created since last counter retrieval.
+  DEFINE_METRIC(kMetricMemoryCacheNumNew, facebook::velox::StatType::SUM);
+
+  // Number of times a valid entry was removed in order to make space, since
+  // last counter retrieval.
+  DEFINE_METRIC(kMetricMemoryCacheNumEvicts, facebook::velox::StatType::SUM);
+
+  // Number of times a valid entry was removed in order to make space but has
+  // not been saved to SSD yet, since last counter retrieval.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumSavableEvicts, facebook::velox::StatType::SUM);
+
+  // Number of entries considered for evicting, since last counter retrieval.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumEvictChecks, facebook::velox::StatType::SUM);
+
+  // Number of times a user waited for an entry to transit from exclusive to
+  // shared mode, since last counter retrieval.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumWaitExclusive, facebook::velox::StatType::SUM);
+
+  // Clocks spent in allocating or freeing memory for backing cache entries,
+  // since last counter retrieval
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumAllocClocks, facebook::velox::StatType::SUM);
+
+  // Number of AsyncDataCache entries that are aged out and evicted
+  // given configured TTL.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumAgedOutEntries, facebook::velox::StatType::SUM);
+
+  // Number of AsyncDataCache entries that are stale because of cache request
+  // size mismatch.
+  DEFINE_METRIC(
+      kMetricMemoryCacheNumStaleEntries, facebook::velox::StatType::COUNT);
+
+  /// ================== SsdCache Counters ==================
+
+  // Number of regions currently cached by SSD.
+  DEFINE_METRIC(kMetricSsdCacheCachedRegions, facebook::velox::StatType::AVG);
+
+  // Number of entries currently cached by SSD.
+  DEFINE_METRIC(kMetricSsdCacheCachedEntries, facebook::velox::StatType::AVG);
+
+  // Total bytes currently cached by SSD.
+  DEFINE_METRIC(kMetricSsdCacheCachedBytes, facebook::velox::StatType::AVG);
+
+  // Total number of entries read from SSD.
+  DEFINE_METRIC(kMetricSsdCacheReadEntries, facebook::velox::StatType::SUM);
+
+  // Total number of bytes read from SSD.
+  DEFINE_METRIC(kMetricSsdCacheReadBytes, facebook::velox::StatType::SUM);
+
+  // Total number of entries written to SSD.
+  DEFINE_METRIC(kMetricSsdCacheWrittenEntries, facebook::velox::StatType::SUM);
+
+  // Total number of bytes written to SSD.
+  DEFINE_METRIC(kMetricSsdCacheWrittenBytes, facebook::velox::StatType::SUM);
+
+  // Total number of SsdCache entries that are aged out and evicted given
+  // configured TTL.
+  DEFINE_METRIC(kMetricSsdCacheAgedOutEntries, facebook::velox::StatType::SUM);
+
+  // Total number of SsdCache regions that are aged out and evicted given
+  // configured TTL.
+  DEFINE_METRIC(kMetricSsdCacheAgedOutRegions, facebook::velox::StatType::SUM);
+
+  // Total number of SSD file open errors.
+  DEFINE_METRIC(kMetricSsdCacheOpenSsdErrors, facebook::velox::StatType::SUM);
+
+  // Total number of SSD checkpoint file open errors.
+  DEFINE_METRIC(
+      kMetricSsdCacheOpenCheckpointErrors, facebook::velox::StatType::SUM);
+
+  // Total number of SSD evict log file open errors.
+  DEFINE_METRIC(kMetricSsdCacheOpenLogErrors, facebook::velox::StatType::SUM);
+
+  // Total number of errors while deleting SSD checkpoint files.
+  DEFINE_METRIC(
+      kMetricSsdCacheDeleteCheckpointErrors, facebook::velox::StatType::SUM);
+
+  // Total number of errors while growing SSD cache files.
+  DEFINE_METRIC(kMetricSsdCacheGrowFileErrors, facebook::velox::StatType::SUM);
+
+  // Total number of error while writing to SSD cache files.
+  DEFINE_METRIC(kMetricSsdCacheWriteSsdErrors, facebook::velox::StatType::SUM);
+
+  // Total number of errors while writing SSD checkpoint file.
+  DEFINE_METRIC(
+      kMetricSsdCacheWriteCheckpointErrors, facebook::velox::StatType::SUM);
+
+  // Total number of writes dropped due to no cache space.
+  DEFINE_METRIC(kMetricSsdCacheWriteSsdDropped, facebook::velox::StatType::SUM);
+
+  // Total number of errors while reading from SSD cache files.
+  DEFINE_METRIC(kMetricSsdCacheReadSsdErrors, facebook::velox::StatType::SUM);
+
+  // Total number of corrupted SSD data read detected by checksum.
+  DEFINE_METRIC(kMetricSsdCacheReadCorruptions, facebook::velox::StatType::SUM);
+
+  // Total number of errors while reading from SSD checkpoint files.
+  DEFINE_METRIC(
+      kMetricSsdCacheReadCheckpointErrors, facebook::velox::StatType::SUM);
+
+  // Total number of SSD cache reads without checksum verification due to
+  // mismatch in SSD cache request size.
+  DEFINE_METRIC(
+      kMetricSsdCacheReadWithoutChecksum, facebook::velox::StatType::SUM);
+
+  // Total number of checkpoints read.
+  DEFINE_METRIC(kMetricSsdCacheCheckpointsRead, facebook::velox::StatType::SUM);
+
+  // Total number of checkpoints written.
+  DEFINE_METRIC(
+      kMetricSsdCacheCheckpointsWritten, facebook::velox::StatType::SUM);
+
+  // Total number of cache regions evicted.
+  DEFINE_METRIC(kMetricSsdCacheRegionsEvicted, facebook::velox::StatType::SUM);
+
+  // Total number of cache entries recovered from checkpoint.
+  DEFINE_METRIC(
+      kMetricSsdCacheRecoveredEntries, facebook::velox::StatType::SUM);
 
   /// ================== Memory Arbitration Counters =================
 
@@ -74,17 +293,31 @@ void registerVeloxMetrics() {
   DEFINE_HISTOGRAM_METRIC(
       kMetricMemoryReclaimExecTimeMs, 30'000, 0, 600'000, 50, 90, 99, 100);
 
-  // Tracks op memory reclaim bytes.
-  DEFINE_METRIC(kMetricMemoryReclaimedBytes, facebook::velox::StatType::SUM);
+  // Tracks op memory reclaim bytes distribution in range of [0, 4GB] with 64
+  // buckets and reports P50, P90, P99, and P100
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricMemoryReclaimedBytes,
+      67'108'864,
+      0,
+      4'294'967'296,
+      50,
+      90,
+      99,
+      100);
 
   // Tracks the memory reclaim count on an operator.
   DEFINE_METRIC(
       kMetricTaskMemoryReclaimCount, facebook::velox::StatType::COUNT);
 
-  // Tracks memory reclaim task wait time in range of [0, 60s] with 10 buckets
+  // Tracks memory reclaim task wait time in range of [0, 60s] with 60 buckets
   // and reports P50, P90, P99, and P100.
   DEFINE_HISTOGRAM_METRIC(
-      kMetricTaskMemoryReclaimWaitTimeMs, 6'000, 0, 60'000, 50, 90, 99, 100);
+      kMetricTaskMemoryReclaimWaitTimeMs, 1'000, 0, 60'000, 50, 90, 99, 100);
+
+  // Tracks memory reclaim task wait time in range of [0, 240s] with 60 buckets
+  // and reports P50, P90, P99, and P100.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricTaskMemoryReclaimExecTimeMs, 4'000, 0, 240'000, 50, 90, 99, 100);
 
   // Tracks the number of times that the task memory reclaim wait timeouts.
   DEFINE_METRIC(
@@ -117,13 +350,20 @@ void registerVeloxMetrics() {
       kMetricArbitratorGlobalArbitrationCount,
       facebook::velox::StatType::COUNT);
 
-  // The distribution of the amount of time an arbitration request stays queued
-  // in range of [0, 600s] with 20 buckets. It is configured to report the
-  // latency at P50, P90, P99, and P100 percentiles.
-  DEFINE_HISTOGRAM_METRIC(
-      kMetricArbitratorQueueTimeMs, 30'000, 0, 600'000, 50, 90, 99, 100);
+  // The number of global arbitration that reclaims used memory by slow disk
+  // spilling.
+  DEFINE_METRIC(
+      kMetricArbitratorSlowGlobalArbitrationCount,
+      facebook::velox::StatType::COUNT);
 
-  // The distribution of the amount of time it take to complete a single
+  // The distribution of the amount of time an arbitration operation stays in
+  // arbitration queues and waits the arbitration r/w locks in range of [0,
+  // 600s] with 20 buckets. It is configured to report the latency at P50, P90,
+  // P99, and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricArbitratorWaitTimeMs, 30'000, 0, 600'000, 50, 90, 99, 100);
+
+  // The distribution of the amount of time it takes to complete a single
   // arbitration request stays queued in range of [0, 600s] with 20
   // buckets. It is configured to report the latency at P50, P90, P99,
   // and P100 percentiles.
@@ -230,5 +470,52 @@ void registerVeloxMetrics() {
   // flushed due to memory reclaiming.
   DEFINE_METRIC(
       kMetricFileWriterEarlyFlushedRawBytes, facebook::velox::StatType::SUM);
+
+  // The current spilling memory usage in bytes.
+  DEFINE_METRIC(kMetricSpillMemoryBytes, facebook::velox::StatType::AVG);
+
+  // The peak spilling memory usage in bytes.
+  DEFINE_METRIC(kMetricSpillPeakMemoryBytes, facebook::velox::StatType::AVG);
+
+  // The data exchange time distribution in range of [0, 5s] with 50 buckets. It
+  // is configured to report the latency at P50, P90, P99, and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricExchangeDataTimeMs, 1'00, 0, 5'000, 50, 90, 99, 100);
+
+  // The exchange data size in bytes.
+  DEFINE_METRIC(kMetricExchangeDataBytes, facebook::velox::StatType::SUM);
+
+  // The number of data exchange requests.
+  DEFINE_METRIC(kMetricExchangeDataCount, facebook::velox::StatType::COUNT);
+
+  // The data exchange size time distribution in range of [0, 5s] with 50
+  // buckets. It is configured to report the latency at P50, P90, P99, and P100
+  // percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricExchangeDataSizeTimeMs, 1'00, 0, 5'000, 50, 90, 99, 100);
+
+  // The distribution of exchange data size in range of [0, 128MB] with 128
+  // buckets. It is configured to report the capacity at P50, P90, P99, and P100
+  // percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricExchangeDataSize, 1L << 20, 0, 128L << 20, 50, 90, 99, 100);
+
+  // The number of data size exchange requests.
+  DEFINE_METRIC(kMetricExchangeDataSizeCount, facebook::velox::StatType::COUNT);
+
+  /// ================== Storage Counters =================
+
+  // The time distribution of storage IO throttled duration in range of [0, 30s]
+  // with 30 buckets. It is configured to report the capacity at P50, P90, P99,
+  // and P100 percentiles.
+  DEFINE_HISTOGRAM_METRIC(
+      kMetricStorageThrottledDurationMs, 1'000, 0, 30'000, 50, 90, 99, 100);
+
+  // The number of times that storage IOs get throttled in a storage directory.
+  DEFINE_METRIC(kMetricStorageLocalThrottled, facebook::velox::StatType::COUNT);
+
+  // The number of times that storage IOs get throttled in a storage cluster.
+  DEFINE_METRIC(
+      kMetricStorageGlobalThrottled, facebook::velox::StatType::COUNT);
 }
 } // namespace facebook::velox

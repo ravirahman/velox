@@ -110,7 +110,7 @@ void ensureRepDefs(
 }
 
 MapColumnReader::MapColumnReader(
-    const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+    const TypePtr& requestedType,
     const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
     ParquetParams& params,
     common::ScanSpec& scanSpec)
@@ -215,12 +215,11 @@ void MapColumnReader::filterRowGroups(
     uint64_t rowGroupSize,
     const dwio::common::StatsContext& context,
     dwio::common::FormatData::FilterRowGroupsResult& result) const {
-  keyReader_->filterRowGroups(rowGroupSize, context, result);
-  elementReader_->filterRowGroups(rowGroupSize, context, result);
+  // empty placeholder to avoid incorrect calling on parent's impl
 }
 
 ListColumnReader::ListColumnReader(
-    const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+    const TypePtr& requestedType,
     const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
     ParquetParams& params,
     common::ScanSpec& scanSpec)
@@ -318,7 +317,7 @@ void ListColumnReader::filterRowGroups(
     uint64_t rowGroupSize,
     const dwio::common::StatsContext& context,
     dwio::common::FormatData::FilterRowGroupsResult& result) const {
-  child_->filterRowGroups(rowGroupSize, context, result);
+  // empty placeholder to avoid incorrect calling on parent's impl
 }
 
 } // namespace facebook::velox::parquet

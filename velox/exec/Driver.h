@@ -19,6 +19,8 @@
 #include <folly/portability/SysSyscall.h>
 #include <memory>
 
+#include "velox/common/base/Counters.h"
+#include "velox/common/base/StatsReporter.h"
 #include "velox/common/future/VeloxPromise.h"
 #include "velox/common/process/ThreadDebugInfo.h"
 #include "velox/common/time/CpuWallTimer.h"
@@ -147,8 +149,10 @@ struct ThreadState {
 
   void clearThread() {
     thread = std::thread::id(); // no thread.
-    startExecTimeMs = 0;
     endExecTimeMs = getCurrentTimeMs();
+    RECORD_HISTOGRAM_METRIC_VALUE(
+        kMetricDriverExecTimeMs, (endExecTimeMs - startExecTimeMs));
+    startExecTimeMs = 0;
     tid = 0;
   }
 
@@ -207,6 +211,9 @@ enum class BlockingReason {
   /// exit them because Task requested to yield or stop or after a certain time.
   /// This is the blocking reason used in such cases.
   kYield,
+  /// Operator is blocked waiting for its associated query memory arbitration to
+  /// finish.
+  kWaitForArbitration,
 };
 
 std::string blockingReasonToString(BlockingReason reason);
@@ -269,7 +276,7 @@ struct DriverCtx {
   const uint32_t partitionId;
 
   std::shared_ptr<Task> task;
-  Driver* driver;
+  Driver* driver{nullptr};
   facebook::velox::process::ThreadDebugInfo threadDebugInfo;
 
   DriverCtx(
@@ -287,6 +294,12 @@ struct DriverCtx {
 
   /// Builds the spill config for the operator with specified 'operatorId'.
   std::optional<common::SpillConfig> makeSpillConfig(int32_t operatorId) const;
+
+  common::PrefixSortConfig prefixSortConfig() const {
+    return common::PrefixSortConfig{
+        queryConfig().prefixSortNormalizedKeyMaxBytes(),
+        queryConfig().prefixSortMinRows()};
+  }
 };
 
 constexpr const char* kOpMethodNone = "";
@@ -383,6 +396,11 @@ class Driver : public std::enable_shared_from_this<Driver> {
   /// Returns true if this driver is running on thread and has exceeded the cpu
   /// time slice limit if set.
   bool shouldYield() const;
+
+  /// Checks if the associated query is under memory arbitration or not. The
+  /// function returns true if it is and set future which is fulfilled when the
+  /// the memory arbiration finishes.
+  bool checkUnderArbitration(ContinueFuture* future);
 
   void initializeOperatorStats(std::vector<OperatorStats>& stats);
 
@@ -504,7 +522,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
   ThreadState state_;
 
   // Timer used to track down the time we are sitting in the driver queue.
-  size_t queueTimeStartMicros_{0};
+  size_t queueTimeStartUs_{0};
   // Id (index in the vector) of the current operator to run (or the 1st one if
   // we haven't started yet). Used to determine which operator's queueTime we
   // should update.
@@ -513,6 +531,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
   std::vector<std::unique_ptr<Operator>> operators_;
 
   BlockingReason blockingReason_{BlockingReason::kNotBlocked};
+  size_t blockedOperatorId_{0};
 
   bool trackOperatorCpuUsage_;
 

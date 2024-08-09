@@ -242,7 +242,7 @@ bool registerKernel(const char* name, const void* func) {
   return true;
 }
 
-KernelInfo kernelInfo(const const void* func) {
+KernelInfo kernelInfo(const void* func) {
   cudaFuncAttributes attrs;
   CUDA_CHECK_FATAL(cudaFuncGetAttributes(&attrs, func));
   KernelInfo info;
@@ -252,8 +252,8 @@ KernelInfo kernelInfo(const const void* func) {
   int max;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max, func, 256, 0);
   info.maxOccupancy0 = max;
-  cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max, func, 256, 16);
-  info.maxOccupancy16 = max;
+  cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max, func, 256, 256 * 32);
+  info.maxOccupancy32 = max;
 
   return info;
 }
@@ -263,7 +263,7 @@ std::string KernelInfo::toString() const {
   out << "NumRegs=" << numRegs << " maxThreadsPerBlock= " << maxThreadsPerBlock
       << " sharedMemory=" << sharedMemory
       << " occupancy 256,  0=" << maxOccupancy0
-      << " occupancy 256,16=" << maxOccupancy16;
+      << " occupancy 256,32=" << maxOccupancy32;
   return out.str();
 }
 

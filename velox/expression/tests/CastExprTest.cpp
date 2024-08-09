@@ -339,27 +339,13 @@ TEST_F(CastExprTest, basics) {
       {false, true, true, true, true, true, true, true, true});
   testCast<std::string, float>(
       "float",
-      {"1.888",
-       "1.",
-       "1",
-       "1.7E308",
-       "Infinity",
-       "-Infinity",
-       "infinity",
-       "inf",
-       "INFINITY",
-       "NaN",
-       "nan"},
+      {"1.888", "1.", "1", "1.7E308", "Infinity", "-Infinity", "NaN"},
       {1.888,
        1.0,
        1.0,
        std::numeric_limits<float>::infinity(),
        std::numeric_limits<float>::infinity(),
        -std::numeric_limits<float>::infinity(),
-       std::numeric_limits<float>::infinity(),
-       std::numeric_limits<float>::infinity(),
-       std::numeric_limits<float>::infinity(),
-       std::numeric_limits<float>::quiet_NaN(),
        std::numeric_limits<float>::quiet_NaN()});
 
   gflags::FlagSaver flagSaver;
@@ -579,6 +565,8 @@ TEST_F(CastExprTest, stringToTimestamp) {
       "1970-01-01 00:00:00",
       "2000-01-01 12:21:56",
       "1970-01-01 00:00:00-02:00",
+      "1970-01-01 00:00:00 +02",
+      "1970-01-01 00:00:00 -0101",
       std::nullopt,
   };
   std::vector<std::optional<Timestamp>> expected{
@@ -588,6 +576,8 @@ TEST_F(CastExprTest, stringToTimestamp) {
       Timestamp(0, 0),
       Timestamp(946729316, 0),
       Timestamp(7200, 0),
+      Timestamp(-7200, 0),
+      Timestamp(3660, 0),
       std::nullopt,
   };
   testCast<std::string, Timestamp>("timestamp", input, expected);
@@ -607,6 +597,32 @@ TEST_F(CastExprTest, stringToTimestamp) {
       Timestamp(-3600, 0),
       Timestamp(10800, 0),
       Timestamp(946729316, 0),
+  };
+  testCast<std::string, Timestamp>("timestamp", input, expected);
+
+  VELOX_ASSERT_THROW(
+      (evaluateOnce<Timestamp, std::string>(
+          "cast(c0 as timestamp)", "1970-01-01T00:00")),
+      "Cannot cast VARCHAR '1970-01-01T00:00' to TIMESTAMP. Unable to parse timestamp value");
+
+  setLegacyCast(true);
+  input = {
+      "1970-01-01",
+      "1970-01-01T00:00 America/Sao_Paulo",
+      "2000-01-01",
+      "1970-01-01T00:00:00",
+      "2000-01-01 12:21:56",
+      "1970-01-01T00:00:00-02:00",
+      std::nullopt,
+  };
+  expected = {
+      Timestamp(0, 0),
+      Timestamp(10800, 0),
+      Timestamp(946684800, 0),
+      Timestamp(0, 0),
+      Timestamp(946729316, 0),
+      Timestamp(7200, 0),
+      std::nullopt,
   };
   testCast<std::string, Timestamp>("timestamp", input, expected);
 }
@@ -676,7 +692,6 @@ TEST_F(CastExprTest, timestampToString) {
           Timestamp(0, 0),
           Timestamp(946729316, 123),
           Timestamp(-50049331622, 0),
-          Timestamp(253405036800, 0),
           Timestamp(-62480038022, 0),
           std::nullopt,
       },
@@ -684,10 +699,27 @@ TEST_F(CastExprTest, timestampToString) {
           "1969-12-31 16:00:00.000",
           "2000-01-01 04:21:56.000",
           "0384-01-01 00:00:00.000",
-          "10000-02-01 08:00:00.000",
           "-0010-02-01 02:00:00.000",
           std::nullopt,
       });
+
+  // Ensure external/date throws since it doesn't know how to convert large
+  // timestamps.
+  auto mustThrow = [&]() {
+    return testCast<Timestamp, std::string>(
+        "string", {Timestamp(253405036800, 0)}, {"10000-02-01 08:00:00.000"});
+  };
+  VELOX_ASSERT_THROW(
+      mustThrow(), "Unable to convert timezone 'America/Los_Angeles' past");
+
+  // try_cast should also throw since it's runtime error.
+  auto tryCastMustThrow = [&]() {
+    return testTryCast<Timestamp, std::string>(
+        "string", {Timestamp(253405036800, 0)}, {"10000-02-01 08:00:00.000"});
+  };
+  VELOX_ASSERT_THROW(
+      tryCastMustThrow(),
+      "Unable to convert timezone 'America/Los_Angeles' past");
 }
 
 TEST_F(CastExprTest, dateToTimestamp) {
@@ -741,6 +773,24 @@ TEST_F(CastExprTest, timestampToDate) {
       },
       TIMESTAMP(),
       DATE());
+
+  // Ensure external/date throws since it doesn't know how to convert large
+  // timestamps.
+  auto mustThrow = [&]() {
+    return testCast<Timestamp, int32_t>(
+        "date", {Timestamp(253405036800, 0)}, {0});
+  };
+  VELOX_ASSERT_THROW(
+      mustThrow(), "Unable to convert timezone 'America/Los_Angeles' past");
+
+  // try_cast should also throw since it's runtime error.
+  auto tryCastMustThrow = [&]() {
+    return testTryCast<Timestamp, int32_t>(
+        "date", {Timestamp(253405036800, 0)}, {0});
+  };
+  VELOX_ASSERT_THROW(
+      tryCastMustThrow(),
+      "Unable to convert timezone 'America/Los_Angeles' past");
 }
 
 TEST_F(CastExprTest, timestampInvalid) {
@@ -802,9 +852,9 @@ TEST_F(CastExprTest, date) {
   testCast<std::string, int32_t>(
       "date",
       {"1970-01-01",
-       "2020-01-01",
-       "2135-11-09",
-       "1969-12-27",
+       " 2020-01-01",
+       "2135-11-09  ",
+       "   1969-12-27 ",
        "1812-04-15",
        "1920-01-02",
        "12345-12-18",
@@ -909,16 +959,6 @@ TEST_F(CastExprTest, invalidDate) {
       {"2015-03-18 (BC)"},
       "Unable to parse date value: \"2015-03-18 (BC)\"",
       VARCHAR());
-  testInvalidCast<std::string>(
-      "date",
-      {"1970-01-01 "},
-      "Unable to parse date value: \"1970-01-01 \"",
-      VARCHAR());
-  testInvalidCast<std::string>(
-      "date",
-      {" 1970-01-01 "},
-      "Unable to parse date value: \" 1970-01-01 \"",
-      VARCHAR());
 }
 
 TEST_F(CastExprTest, primitiveInvalidCornerCases) {
@@ -996,40 +1036,47 @@ TEST_F(CastExprTest, primitiveInvalidCornerCases) {
 
     // Invalid strings.
     testInvalidCast<std::string>(
-        "real",
-        {"1.2a"},
-        "Non-whitespace character found after end of conversion");
+        "real", {"1.2a"}, "Cannot cast VARCHAR '1.2a' to REAL");
     testInvalidCast<std::string>(
-        "real",
-        {"1.2.3"},
-        "Non-whitespace character found after end of conversion");
+        "real", {"1.2.3"}, "Cannot cast VARCHAR '1.2.3' to REAL");
+    testInvalidCast<std::string>(
+        "real", {"nAn"}, "Cannot cast VARCHAR 'nAn' to REAL");
+    testInvalidCast<std::string>(
+        "real", {" nAn "}, "Cannot cast VARCHAR ' nAn ' to REAL");
+    testInvalidCast<std::string>(
+        "double", {"nAn"}, "Cannot cast VARCHAR 'nAn' to DOUBLE");
+    testInvalidCast<std::string>(
+        "real", {"iNfinitY"}, "Cannot cast VARCHAR 'iNfinitY' to REAL");
+    testInvalidCast<std::string>(
+        "double", {"iNfinitY"}, "Cannot cast VARCHAR 'iNfinitY' to DOUBLE");
+    testInvalidCast<std::string>(
+        "double", {" iNfinitY "}, "Cannot cast VARCHAR ' iNfinitY ' to DOUBLE");
+    testInvalidCast<std::string>(
+        "double", {""}, "Cannot cast VARCHAR '' to DOUBLE");
+    testInvalidCast<std::string>(
+        "double", {"   "}, "Cannot cast VARCHAR '   ' to DOUBLE");
+    testInvalidCast<std::string>(
+        "real", {"NaN  ."}, "Cannot cast VARCHAR 'NaN  .' to REAL");
+    testInvalidCast<std::string>(
+        "real", {"- NaN"}, "Cannot cast VARCHAR '- NaN' to REAL");
   }
 
   // To boolean.
   {
     testInvalidCast<std::string>(
-        "boolean",
-        {"1.7E308"},
-        "Non-whitespace character found after end of conversion");
+        "boolean", {"1.7E308"}, "Cannot cast VARCHAR '1.7E308' to BOOLEAN");
     testInvalidCast<std::string>(
-        "boolean",
-        {"nan"},
-        "Non-whitespace character found after end of conversion");
+        "boolean", {"nan"}, "Cannot cast VARCHAR 'nan' to BOOLEAN");
     testInvalidCast<std::string>(
-        "boolean", {"infinity"}, "Invalid value for bool");
+        "boolean", {"infinity"}, "Cannot cast VARCHAR 'infinity' to BOOLEAN");
     testInvalidCast<std::string>(
-        "boolean",
-        {"12"},
-        "Integer overflow when parsing bool (must be 0 or 1)");
-    testInvalidCast<std::string>("boolean", {"-1"}, "Invalid value for bool");
+        "boolean", {"12"}, "Cannot cast VARCHAR '12' to BOOLEAN");
     testInvalidCast<std::string>(
-        "boolean",
-        {"tr"},
-        "Non-whitespace character found after end of conversion");
+        "boolean", {"-1"}, "Cannot cast VARCHAR '-1' to BOOLEAN");
     testInvalidCast<std::string>(
-        "boolean",
-        {"tru"},
-        "Non-whitespace character found after end of conversion");
+        "boolean", {"tr"}, "Cannot cast VARCHAR 'tr' to BOOLEAN");
+    testInvalidCast<std::string>(
+        "boolean", {"tru"}, "Cannot cast VARCHAR 'tru' to BOOLEAN");
   }
 }
 
@@ -1047,14 +1094,13 @@ TEST_F(CastExprTest, primitiveValidCornerCases) {
     testCast<std::string, float>("real", {"1.7E308"}, {kInf});
     testCast<std::string, float>("real", {"1."}, {1.0});
     testCast<std::string, float>("real", {"1"}, {1});
-    // When casting from "Infinity" and "NaN", Presto is case sensitive. But we
-    // let them be case insensitive to be consistent with other conversions.
-    testCast<std::string, float>("real", {"infinity"}, {kInf});
-    testCast<std::string, float>("real", {"-infinity"}, {-kInf});
-    testCast<std::string, float>("real", {"InfiNiTy"}, {kInf});
-    testCast<std::string, float>("real", {"-InfiNiTy"}, {-kInf});
-    testCast<std::string, float>("real", {"nan"}, {kNan});
-    testCast<std::string, float>("real", {"nAn"}, {kNan});
+    testCast<std::string, float>("real", {"  1  "}, {1});
+    testCast<std::string, float>("real", {"-Infinity"}, {-kInf});
+    testCast<std::string, float>("real", {"+Infinity"}, {kInf});
+    testCast<std::string, float>("real", {" Infinity "}, {kInf});
+    testCast<std::string, float>("real", {"  NaN  "}, {kNan});
+    testCast<std::string, float>("real", {"  -NaN  "}, {kNan});
+    testCast<std::string, float>("real", {"  +NaN  "}, {kNan});
   }
 
   // To boolean.
@@ -1076,6 +1122,14 @@ TEST_F(CastExprTest, primitiveValidCornerCases) {
     testCast<std::string, bool>("boolean", {"0"}, {false});
     testCast<std::string, bool>("boolean", {"t"}, {true});
     testCast<std::string, bool>("boolean", {"true"}, {true});
+    testCast<std::string, bool>("boolean", {"false"}, {false});
+    testCast<std::string, bool>("boolean", {"f"}, {false});
+
+    testInvalidCast<std::string>(
+        "boolean", {"NO"}, "Cannot cast NO to BOOLEAN");
+
+    testInvalidCast<std::string>(
+        "boolean", {"off"}, "Cannot cast off to BOOLEAN");
   }
 
   // To string.
@@ -1094,7 +1148,7 @@ TEST_F(CastExprTest, truncateVsRound) {
   testInvalidCast<int32_t>(
       "tinyint",
       {1111111, 1000, -100101},
-      "Cannot cast INTEGER '1111111' to TINYINT. Overflow during arithmetic conversion: (signed char) 1111111");
+      "Cannot cast INTEGER '1111111' to TINYINT. Overflow during arithmetic conversion:");
 }
 
 TEST_F(CastExprTest, nullInputs) {
@@ -1702,6 +1756,17 @@ TEST_F(CastExprTest, decimalToDecimal) {
               {DecimalUtil::kLongDecimalMin}, DECIMAL(38, 0)),
           makeNullableFlatVector<int128_t>({0}, DECIMAL(38, 1))),
       "Cannot cast DECIMAL '-99999999999999999999999999999999999999' to DECIMAL(38, 1)");
+}
+
+TEST_F(CastExprTest, integerToBinary) {
+  testInvalidCast<int8_t>(
+      "varbinary", {12}, "Cannot cast TINYINT to VARBINARY.");
+  testInvalidCast<int16_t>(
+      "varbinary", {12}, "Cannot cast SMALLINT to VARBINARY.");
+  testInvalidCast<int32_t>(
+      "varbinary", {12}, "Cannot cast INTEGER to VARBINARY.");
+  testInvalidCast<int64_t>(
+      "varbinary", {12}, "Cannot cast BIGINT to VARBINARY.");
 }
 
 TEST_F(CastExprTest, integerToDecimal) {
@@ -2603,7 +2668,10 @@ TEST_F(CastExprTest, intervalDayTimeToVarchar) {
            kMillisInMinute,
            kMillisInSecond,
            5 * kMillisInDay + 14 * kMillisInHour + 20 * kMillisInMinute +
-               52 * kMillisInSecond + 88},
+               52 * kMillisInSecond + 88,
+           -(kMillisInDay + kMillisInHour + kMillisInMinute + kMillisInSecond +
+             88),
+           std::numeric_limits<int64_t>::min()},
           INTERVAL_DAY_TIME()),
   });
 
@@ -2614,9 +2682,11 @@ TEST_F(CastExprTest, intervalDayTimeToVarchar) {
       "0 00:01:00.000",
       "0 00:00:01.000",
       "5 14:20:52.088",
+      "-1 01:01:01.088",
+      "-106751991167 07:12:55.808",
   });
 
-  assertEqualVectors(result, expected);
+  assertEqualVectors(expected, result);
 
   // Reverse cast is not supported.
   VELOX_ASSERT_THROW(

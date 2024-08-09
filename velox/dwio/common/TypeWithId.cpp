@@ -15,6 +15,7 @@
  */
 
 #include "velox/dwio/common/TypeWithId.h"
+
 #include "velox/dwio/common/exception/Exception.h"
 
 namespace facebook::velox::dwio::common {
@@ -47,7 +48,9 @@ TypeWithId::TypeWithId(
       column_{column},
       children_{toShared(std::move(children))} {
   for (auto& child : children_) {
-    const_cast<const TypeWithId*&>(child->parent_) = this;
+    if (child) {
+      const_cast<const TypeWithId*&>(child->parent_) = this;
+    }
   }
 }
 
@@ -55,6 +58,35 @@ std::unique_ptr<TypeWithId> TypeWithId::create(
     const std::shared_ptr<const Type>& root,
     uint32_t next) {
   return create(root, next, 0);
+}
+
+namespace {
+
+int countNodes(const TypePtr& type) {
+  int count = 1;
+  for (auto& child : *type) {
+    count += countNodes(child);
+  }
+  return count;
+}
+
+} // namespace
+
+std::unique_ptr<TypeWithId> TypeWithId::create(
+    const RowTypePtr& type,
+    const velox::common::ScanSpec& spec) {
+  uint32_t next = 1;
+  std::vector<std::unique_ptr<TypeWithId>> children(type->size());
+  for (int i = 0, size = type->size(); i < size; ++i) {
+    auto* childSpec = spec.childByName(type->nameOf(i));
+    if (childSpec && !childSpec->isConstant()) {
+      children[i] = create(type->childAt(i), next, i);
+    } else {
+      next += countNodes(type->childAt(i));
+    }
+  }
+  return std::make_unique<TypeWithId>(
+      type, std::move(children), 0, next - 1, 0);
 }
 
 uint32_t TypeWithId::size() const {
@@ -84,6 +116,56 @@ std::unique_ptr<TypeWithId> TypeWithId::create(
   const uint32_t maxId = next - 1;
   return std::make_unique<TypeWithId>(
       type, std::move(children), myId, maxId, column);
+}
+
+std::string TypeWithId::fullName() const {
+  std::vector<std::string> path;
+  auto* child = this;
+  while (auto* parent = child->parent_) {
+    switch (parent->type()->kind()) {
+      case TypeKind::ROW: {
+        auto& siblings = parent->children_;
+        bool found = false;
+        for (int i = 0; i < siblings.size(); ++i) {
+          if (siblings[i].get() == child) {
+            path.push_back('.' + parent->type()->asRow().nameOf(i));
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          VELOX_FAIL(
+              "Child {} not found in parent {}",
+              child->type()->toString(),
+              parent->type()->toString());
+        }
+        break;
+      }
+      case TypeKind::ARRAY:
+        break;
+      case TypeKind::MAP:
+        if (child == parent->children_.at(0).get()) {
+          path.push_back(".<keys>");
+        } else {
+          VELOX_CHECK(child == parent->children_.at(1).get());
+          path.push_back(".<values>");
+        }
+        break;
+      default:
+        VELOX_UNREACHABLE();
+    }
+    child = parent;
+  }
+  std::string ans;
+  for (int i = path.size() - 1; i >= 0; --i) {
+    if (i == path.size() - 1) {
+      VELOX_CHECK_EQ(path[i][0], '.');
+      ans += path[i].substr(1);
+    } else {
+      ans += path[i];
+    }
+  }
+  return ans;
 }
 
 } // namespace facebook::velox::dwio::common

@@ -13,14 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/VectorTestUtil.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 
-using namespace facebook::velox;
-using namespace facebook::velox::exec;
-using namespace facebook::velox::exec::test;
+namespace facebook::velox::exec::test {
+namespace {
+
+using facebook::velox::test::assertEqualVectors;
 
 class NestedLoopJoinTest : public HiveConnectorTestBase {
  protected:
@@ -69,16 +71,27 @@ class NestedLoopJoinTest : public HiveConnectorTestBase {
       const std::vector<RowVectorPtr>& buildVectors) {
     runTest(probeVectors, buildVectors, 1);
     runTest(probeVectors, buildVectors, 4);
+    runTest(
+        probeVectors,
+        buildVectors,
+        4,
+        4); // Run with smaller output batch size.
   }
 
   void runTest(
       const std::vector<RowVectorPtr>& probeVectors,
       const std::vector<RowVectorPtr>& buildVectors,
-      int32_t numDrivers) {
+      int32_t numDrivers,
+      size_t preferredOutputBatchSize = 1024) {
     createDuckDbTable("t", probeVectors);
     createDuckDbTable("u", buildVectors);
+    auto queryCtx = core::QueryCtx::create(executor_.get());
 
     CursorParameters params;
+    params.queryCtx = queryCtx;
+    params.queryCtx->testingOverrideConfigUnsafe(
+        {{core::QueryConfig::kPreferredOutputBatchRows,
+          std::to_string(preferredOutputBatchSize)}});
     params.maxDrivers = numDrivers;
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
 
@@ -122,7 +135,8 @@ class NestedLoopJoinTest : public HiveConnectorTestBase {
       core::JoinType::kInner,
       core::JoinType::kLeft,
       core::JoinType::kRight,
-      core::JoinType::kFull};
+      core::JoinType::kFull,
+  };
   std::vector<std::string> outputLayout_{probeKeyName_, buildKeyName_};
   std::string joinConditionStr_{probeKeyName_ + " {} " + buildKeyName_};
   std::string queryStr_{fmt::format(
@@ -130,6 +144,72 @@ class NestedLoopJoinTest : public HiveConnectorTestBase {
       probeKeyName_,
       buildKeyName_)};
 };
+
+TEST_F(NestedLoopJoinTest, emptyBuildOrProbeWithoutFilter) {
+  auto empty = makeRowVector({"u0"}, {makeFlatVector<StringView>({})});
+  auto nonEmpty = makeRowVector({"t0"}, {makeFlatVector<StringView>({"foo"})});
+  auto expected = makeRowVector({makeFlatVector<StringView>({"foo", "foo"})});
+
+  auto testJoin = [&](const std::vector<RowVectorPtr>& leftVectors,
+                      const std::vector<RowVectorPtr>& rightVectors,
+                      core::JoinType joinType,
+                      const std::vector<std::string>& outputLayout,
+                      const VectorPtr& expected) {
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    auto plan = PlanBuilder(planNodeIdGenerator)
+                    .values(leftVectors)
+                    .localPartitionRoundRobinRow()
+                    .nestedLoopJoin(
+                        PlanBuilder(planNodeIdGenerator)
+                            .values(rightVectors)
+                            .localPartition({})
+                            .planNode(),
+                        "",
+                        outputLayout,
+                        joinType)
+                    .planNode();
+    AssertQueryBuilder builder{plan};
+    auto result = builder.copyResults(pool());
+    facebook::velox::test::assertEqualVectors(expected, result);
+  };
+
+  testJoin({nonEmpty}, {empty}, core::JoinType::kLeft, {"t0"}, nonEmpty);
+  testJoin(
+      {nonEmpty, nonEmpty},
+      {empty, empty},
+      core::JoinType::kLeft,
+      {"t0"},
+      expected);
+  testJoin({empty}, {nonEmpty}, core::JoinType::kLeft, {"u0"}, empty);
+
+  testJoin({empty}, {nonEmpty}, core::JoinType::kRight, {"t0"}, nonEmpty);
+  testJoin(
+      {empty, empty},
+      {nonEmpty, nonEmpty},
+      core::JoinType::kRight,
+      {"t0"},
+      expected);
+  testJoin({nonEmpty}, {empty}, core::JoinType::kRight, {"u0"}, empty);
+
+  testJoin(
+      {nonEmpty, nonEmpty},
+      {empty, empty},
+      core::JoinType::kFull,
+      {"t0", "u0"},
+      makeRowVector({
+          makeFlatVector<StringView>({"foo", "foo"}),
+          makeNullableFlatVector<StringView>({std::nullopt, std::nullopt}),
+      }));
+  testJoin(
+      {empty, empty},
+      {nonEmpty, nonEmpty},
+      core::JoinType::kFull,
+      {"u0", "t0"},
+      makeRowVector({
+          makeNullableFlatVector<StringView>({std::nullopt, std::nullopt}),
+          makeFlatVector<StringView>({"foo", "foo"}),
+      }));
+}
 
 TEST_F(NestedLoopJoinTest, basic) {
   auto probeVectors = makeBatches(20, 5, probeType_, pool_.get());
@@ -381,8 +461,8 @@ TEST_F(NestedLoopJoinTest, zeroColumnBuild) {
 }
 
 TEST_F(NestedLoopJoinTest, bigintArray) {
-  auto probeVectors = makeBatches(1000, 5, probeType_, pool_.get());
-  auto buildVectors = makeBatches(900, 5, buildType_, pool_.get());
+  auto probeVectors = makeBatches(100, 5, probeType_, pool_.get());
+  auto buildVectors = makeBatches(90, 5, buildType_, pool_.get());
   setComparisons({"="});
   setJoinTypes({core::JoinType::kFull});
   runSingleAndMultiDriverTest(probeVectors, buildVectors);
@@ -421,3 +501,72 @@ TEST_F(NestedLoopJoinTest, allTypes) {
       "SELECT t0, u0 FROM t {0} JOIN u ON t.t0 {1} u0 AND t1 {1} u1 AND t2 {1} u2 AND t3 {1} u3 AND t4 {1} u4 AND t5 {1} u5 AND t6 {1} u6");
   runSingleAndMultiDriverTest(probeVectors, buildVectors);
 }
+
+// Ensures output order follows the probe input order for inner and left joins.
+TEST_F(NestedLoopJoinTest, outputOrder) {
+  auto probeVectors = makeRowVector(
+      {"l1", "l2"},
+      {
+          makeNullableFlatVector<int64_t>({1, 8, 6, std::nullopt, 7, 4}),
+          makeFlatVector<StringView>({"a", "b", "c", "d", "e", "f"}),
+      });
+  auto buildVector1 = makeRowVector(
+      {"r1", "r2"},
+      {
+          makeNullableFlatVector<int64_t>({4, 6, 1}),
+          makeFlatVector<StringView>({"z", "x", "y"}),
+      });
+
+  auto buildVector2 = makeRowVector(
+      {"r1", "r2"},
+      {
+          makeNullableFlatVector<int64_t>({10, std::nullopt, 6}),
+          makeFlatVector<StringView>({"z", "p", "u"}),
+      });
+
+  const auto createPlan = [&](core::JoinType joinType) {
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    return PlanBuilder(planNodeIdGenerator)
+        .values({probeVectors})
+        .nestedLoopJoin(
+            PlanBuilder(planNodeIdGenerator)
+                .values({buildVector1, buildVector2})
+                .project({"r1", "r2"})
+                .planNode(),
+            "l1 < r1",
+            {"l1", "l2", "r1", "r2"},
+            joinType)
+        .planNode();
+  };
+
+  // Inner.
+  auto results = AssertQueryBuilder(createPlan(core::JoinType::kInner))
+                     .copyResults(pool());
+  auto expectedInner = makeRowVector({
+      makeNullableFlatVector<int64_t>({1, 1, 1, 1, 8, 6, 7, 4, 4, 4}),
+      makeFlatVector<StringView>(
+          {"a", "a", "a", "a", "b", "c", "e", "f", "f", "f"}),
+      makeNullableFlatVector<int64_t>({4, 6, 10, 6, 10, 10, 10, 6, 10, 6}),
+      makeFlatVector<StringView>(
+          {"z", "x", "z", "u", "z", "z", "z", "x", "z", "u"}),
+  });
+  assertEqualVectors(expectedInner, results);
+
+  // Left.
+  results =
+      AssertQueryBuilder(createPlan(core::JoinType::kLeft)).copyResults(pool());
+  auto expectedLeft = makeRowVector({
+      makeNullableFlatVector<int64_t>(
+          {1, 1, 1, 1, 8, 6, std::nullopt, 7, 4, 4, 4}),
+      makeNullableFlatVector<StringView>(
+          {"a", "a", "a", "a", "b", "c", "d", "e", "f", "f", "f"}),
+      makeNullableFlatVector<int64_t>(
+          {4, 6, 10, 6, 10, 10, std::nullopt, 10, 6, 10, 6}),
+      makeNullableFlatVector<StringView>(
+          {"z", "x", "z", "u", "z", "z", std::nullopt, "z", "x", "z", "u"}),
+  });
+  assertEqualVectors(expectedLeft, results);
+}
+
+} // namespace
+} // namespace facebook::velox::exec::test

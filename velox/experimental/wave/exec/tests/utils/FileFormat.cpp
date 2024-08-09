@@ -15,6 +15,7 @@
  */
 
 #include "velox/experimental/wave/exec/tests/utils/FileFormat.h"
+#include <iostream>
 
 namespace facebook::velox::wave::test {
 
@@ -165,6 +166,28 @@ struct StringWithId {
   int32_t id;
 };
 
+void printSums(uint64_t* bits, int32_t numBits) {
+  std::cout << "***Flags\n";
+  int32_t cnt = 0;
+  for (auto i = 0; i < bits::nwords(numBits) - 16; i += 16) {
+    cnt += bits::countBits(bits, i * 64, (i + 16) * 64);
+    std::cout << fmt::format("{}: {}\n", (i + 16) * 64, cnt);
+  }
+}
+
+std::unique_ptr<Column>
+encodeBits(uint64_t* bits, int32_t numBits, memory::MemoryPool* pool) {
+  auto column = std::make_unique<Column>();
+  column->encoding = kFlat;
+  column->kind = TypeKind::BOOLEAN;
+  column->numValues = numBits;
+  column->values = AlignedBuffer::allocate<bool>(numBits, pool);
+  memcpy(column->values->asMutable<char>(), bits, bits::nbytes(numBits));
+  column->bitWidth = 1;
+  // printSums(bits, numBits);
+  return column;
+}
+
 template <typename T>
 std::unique_ptr<Column>
 directInts(std::vector<T>& ints, T min, T max, memory::MemoryPool* pool) {
@@ -178,6 +201,9 @@ template <typename T>
 std::unique_ptr<Column> Encoder<T>::toColumn() {
   auto column = std::make_unique<Column>();
   column->kind = kind_;
+  if (!nulls_.empty()) {
+    column->nulls = encodeBits(nulls_.data(), count_, pool_);
+  }
   if (distincts_.size() <= 1) {
     VELOX_NYI("constant not supported");
   }
@@ -250,10 +276,8 @@ StringView StringSet::add(StringView data) {
 
 std::unique_ptr<Column> StringSet::toColumn() {
   auto buffer = AlignedBuffer::allocate<char>(totalSize_, pool_);
-  int64_t fill = 0;
   for (auto& piece : buffers_) {
     memcpy(buffer->asMutable<char>(), piece->as<char>(), piece->size());
-    fill += piece->size();
   }
   auto column = std::make_unique<Column>();
   column->kind = TypeKind::VARCHAR;
@@ -291,12 +315,26 @@ void Encoder<StringView>::add(StringView data) {
 }
 
 template <typename T>
+void Encoder<T>::addNull() {
+  ++count_;
+  auto n = bits::nwords(count_);
+  if (nulls_.size() < n) {
+    nulls_.resize(n, bits::kNotNull64);
+  }
+  bits::setBit(nulls_.data(), count_ - 1, bits::kNull);
+}
+
+template <typename T>
 void Encoder<T>::append(const VectorPtr& data) {
   auto size = data->size();
   SelectivityVector allRows(size);
   DecodedVector decoded(*data, allRows, true);
   for (auto i = 0; i < size; ++i) {
-    add(decoded.valueAt<T>(i));
+    if (decoded.isNullAt(i)) {
+      addNull();
+    } else {
+      add(decoded.valueAt<T>(i));
+    }
   }
 }
 
@@ -312,15 +350,24 @@ void Writer::append(RowVectorPtr data) {
   for (auto i = 0; i < encoders_.size(); ++i) {
     encoders_[i]->append(data->childAt(i));
   }
+  rowsInStripe_ += data->size();
+  if (rowsInStripe_ >= stripeSize_) {
+    finishStripe();
+  }
 }
 
 void Writer::finishStripe() {
+  if (encoders_.empty()) {
+    return;
+  }
   std::vector<std::unique_ptr<Column>> columns;
   for (auto& encoder : encoders_) {
     columns.push_back(encoder->toColumn());
   }
   stripes_.push_back(std::make_unique<Stripe>(
       std::move(columns), dwio::common::TypeWithId::create(type_)));
+  encoders_.clear();
+  rowsInStripe_ = 0;
 }
 
 Table* Writer::finalize(std::string tableName) {

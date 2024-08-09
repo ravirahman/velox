@@ -27,6 +27,7 @@ add_executable(
   ExprTest.cpp
   ExprToSubfieldFilterTest.cpp
   EvalCtxTest.cpp
+  EvalErrorsTest.cpp
   EvalSimplifiedTest.cpp
   FunctionCallToSpecialFormTest.cpp
   GenericViewTest.cpp
@@ -43,7 +44,6 @@ add_executable(
   SimpleFunctionInitTest.cpp
   SimpleFunctionPresetNullsTest.cpp
   SimpleFunctionTest.cpp
-  StringWriterTest.cpp
   StringWriterTest.cpp
   TryExprTest.cpp
   VariadicViewTest.cpp
@@ -82,18 +82,29 @@ target_link_libraries(
 add_library(velox_expression_verifier ExpressionVerifier.cpp)
 
 target_link_libraries(
-  velox_expression_verifier velox_vector_test_lib velox_vector_fuzzer
-  velox_type velox_expression_test_utility)
+  velox_expression_verifier
+  velox_vector_test_lib
+  velox_vector_fuzzer
+  velox_type
+  velox_expression_test_utility)
 
 add_library(velox_expression_runner ExpressionRunner.cpp)
 target_link_libraries(
-  velox_expression_runner velox_expression_verifier velox_functions_prestosql
-  velox_functions_spark velox_parse_parser gtest)
+  velox_expression_runner
+  velox_expression_verifier
+  velox_functions_prestosql
+  velox_functions_spark
+  velox_parse_parser
+  gtest)
 
 add_executable(velox_expression_runner_test ExpressionRunnerTest.cpp)
 target_link_libraries(
-  velox_expression_runner_test velox_expression_runner velox_exec_test_lib
-  velox_function_registry gtest gtest_main)
+  velox_expression_runner_test
+  velox_expression_runner
+  velox_exec_test_lib
+  velox_function_registry
+  gtest
+  gtest_main)
 
 add_executable(velox_expression_verifier_unit_test
                ExpressionVerifierUnitTest.cpp)

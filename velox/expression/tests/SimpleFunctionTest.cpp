@@ -1394,6 +1394,15 @@ TEST_F(SimpleFunctionTest, decimals) {
   // Verify overwrite behavior. Register a different function using the same
   // name and physical signature as decimal_plus_one. Expect the new function to
   // be used for (short) -> short signature.
+  // Not overwrite function registry.
+  registerFunction<
+      DecimalPlusTwoFunction,
+      ShortDecimal<P1, S1>,
+      ShortDecimal<P1, S1>>({"decimal_plus_one"}, {}, false);
+  result = evaluate("decimal_plus_one(c1)", data);
+  assertEqualVectors(expected, result);
+
+  // Overwrite function registry.
   registerFunction<
       DecimalPlusTwoFunction,
       ShortDecimal<P1, S1>,
@@ -1531,6 +1540,73 @@ TEST_F(SimpleFunctionTest, noThrow) {
   VELOX_ASSERT_THROW(
       (evaluateOnce<int64_t, int64_t>("try(no_throw(c0))", 6)),
       "Input must not be 6");
+}
+
+template <typename TExec>
+struct CallNullableNoThrowFunction {
+  VELOX_DEFINE_FUNCTION_TYPES(TExec);
+
+  Status callNullable(out_type<int64_t>& out, const arg_type<int64_t>* in) {
+    if (!in) {
+      return Status::UserError("Input cannot be NULL");
+    }
+    out = *in + 1;
+    return Status::OK();
+  }
+};
+
+TEST_F(SimpleFunctionTest, callNullableNoThrow) {
+  registerFunction<CallNullableNoThrowFunction, int64_t, int64_t>(
+      {"nullable_no_throw"});
+  // Error reported via Status by callNullable.
+  VELOX_ASSERT_THROW(
+      (evaluateOnce<int64_t, int64_t>("nullable_no_throw(c0)", std::nullopt)),
+      "Input cannot be NULL");
+  auto result = evaluateOnce<int64_t, int64_t>(
+      "try(nullable_no_throw(c0))", std::nullopt);
+  EXPECT_EQ(std::nullopt, result);
+
+  // No error.
+  result = evaluateOnce<int64_t, int64_t>("nullable_no_throw(c0)", 1);
+  EXPECT_EQ(2, result);
+}
+
+template <typename TExec>
+struct CallNullFreeNoThrowFunction {
+  VELOX_DEFINE_FUNCTION_TYPES(TExec);
+
+  Status callNullFree(out_type<int64_t>& out, const arg_type<int64_t>& in) {
+    if (in == 0) {
+      return Status::UserError("Input cannot be 0");
+    }
+    if (in % 2 == 0) {
+      return Status::UserError("Input cannot be even");
+    }
+    out = in + 1;
+    return Status::OK();
+  }
+};
+
+TEST_F(SimpleFunctionTest, callNullFreeNoThrow) {
+  registerFunction<CallNullFreeNoThrowFunction, int64_t, int64_t>(
+      {"null_free_no_throw"});
+  // Error reported via Status by callNullable.
+  VELOX_ASSERT_THROW(
+      (evaluateOnce<int64_t, int64_t>("null_free_no_throw(c0)", 0)),
+      "Input cannot be 0");
+  auto result =
+      evaluateOnce<int64_t, int64_t>("try(null_free_no_throw(c0))", 0);
+  EXPECT_EQ(std::nullopt, result);
+
+  VELOX_ASSERT_THROW(
+      (evaluateOnce<int64_t, int64_t>("null_free_no_throw(c0)", 4)),
+      "Input cannot be even");
+  result = evaluateOnce<int64_t, int64_t>("try(null_free_no_throw(c0))", 4);
+  EXPECT_EQ(std::nullopt, result);
+
+  // No error.
+  result = evaluateOnce<int64_t, int64_t>("null_free_no_throw(c0)", 1);
+  EXPECT_EQ(2, result);
 }
 
 } // namespace

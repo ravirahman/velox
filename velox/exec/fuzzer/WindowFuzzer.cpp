@@ -17,6 +17,7 @@
 #include "velox/exec/fuzzer/WindowFuzzer.h"
 
 #include <boost/random/uniform_int_distribution.hpp>
+#include "velox/common/base/Portability.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 
@@ -28,15 +29,6 @@ DEFINE_bool(
 namespace facebook::velox::exec::test {
 
 namespace {
-
-void logVectors(const std::vector<RowVectorPtr>& vectors) {
-  for (auto i = 0; i < vectors.size(); ++i) {
-    VLOG(1) << "Input batch " << i << ":";
-    for (auto j = 0; j < vectors[i]->size(); ++j) {
-      VLOG(1) << "\tRow " << j << ": " << vectors[i]->toString(j);
-    }
-  }
-}
 
 bool supportIgnoreNulls(const std::string& name) {
   // Below are all functions that support ignore nulls. Aggregation functions in
@@ -185,8 +177,7 @@ std::string WindowFuzzer::getFrame(
   return frame.str();
 }
 
-std::vector<WindowFuzzer::SortingKeyAndOrder>
-WindowFuzzer::generateSortingKeysAndOrders(
+std::vector<SortingKeyAndOrder> WindowFuzzer::generateSortingKeysAndOrders(
     const std::string& prefix,
     std::vector<std::string>& names,
     std::vector<TypePtr>& types) {
@@ -243,8 +234,8 @@ void WindowFuzzer::go() {
     }
     const auto partitionKeys = generateSortingKeys("p", argNames, argTypes);
     const auto [frameClause, isRowsFrame] = generateFrameClause();
-    const auto input =
-        generateInputDataWithRowNumber(argNames, argTypes, signature);
+    const auto input = generateInputDataWithRowNumber(
+        argNames, argTypes, partitionKeys, signature);
     // If the function is order-dependent or uses "rows" frame, sort all input
     // rows by row_number additionally.
     if (requireSortedInput || isRowsFrame) {
@@ -326,8 +317,14 @@ void WindowFuzzer::testAlternativePlans(
   auto directory = exec::test::TempDirectoryPath::create();
   const auto inputRowType = asRowType(input[0]->type());
   if (isTableScanSupported(inputRowType)) {
-    auto splits = makeSplits(input, directory->getPath());
+    auto splits = makeSplits(input, directory->getPath(), writerPool_);
 
+// There is a known issue where LocalPartition will send DictionaryVectors
+// with the same underlying base Vector to multiple threads.  This triggers
+// TSAN to report data races, particularly if that base Vector is from the
+// TableScan and reused.  Don't run these tests when TSAN is enabled to avoid
+// the false negatives.
+#ifndef TSAN_BUILD
     plans.push_back(
         {PlanBuilder()
              .tableScan(inputRowType)
@@ -335,6 +332,7 @@ void WindowFuzzer::testAlternativePlans(
              .window({fmt::format("{} over ({})", functionCall, frame)})
              .planNode(),
          splits});
+#endif
 
     if (!allKeys.empty()) {
       plans.push_back(
@@ -360,11 +358,17 @@ void initializeVerifier(
     const std::shared_ptr<ResultVerifier>& customVerifier,
     const std::vector<RowVectorPtr>& input,
     const std::vector<std::string>& partitionKeys,
+    const std::vector<SortingKeyAndOrder>& sortingKeysAndOrders,
     const std::string& frame) {
   const auto& windowNode =
       std::dynamic_pointer_cast<const core::WindowNode>(plan);
   customVerifier->initializeWindow(
-      input, partitionKeys, windowNode->windowFunctions()[0], frame, "w0");
+      input,
+      partitionKeys,
+      sortingKeysAndOrders,
+      windowNode->windowFunctions()[0],
+      frame,
+      "w0");
 }
 } // namespace
 
@@ -402,7 +406,8 @@ bool WindowFuzzer::verifyWindow(
 
     if (!customVerification) {
       if (resultOrError.result && enableWindowVerification) {
-        auto referenceResult = computeReferenceResults(plan, input);
+        auto referenceResult =
+            computeReferenceResults(plan, input, referenceQueryRunner_.get());
         stats_.updateReferenceQueryStats(referenceResult.second);
         if (auto expectedResult = referenceResult.first) {
           ++stats_.numVerified;
@@ -425,7 +430,13 @@ bool WindowFuzzer::verifyWindow(
         VELOX_CHECK(
             customVerifier->supportsVerify(),
             "Window fuzzer only uses custom verify() methods.");
-        initializeVerifier(plan, customVerifier, input, partitionKeys, frame);
+        initializeVerifier(
+            plan,
+            customVerifier,
+            input,
+            partitionKeys,
+            sortingKeysAndOrders,
+            frame);
         customVerifier->verify(resultOrError.result);
       }
     }
@@ -460,6 +471,7 @@ void windowFuzzer(
     const std::unordered_set<std::string>& orderDependentFunctions,
     VectorFuzzer::Options::TimestampPrecision timestampPrecision,
     const std::unordered_map<std::string, std::string>& queryConfigs,
+    bool orderableGroupKeys,
     const std::optional<std::string>& planPath,
     std::unique_ptr<ReferenceQueryRunner> referenceQueryRunner) {
   auto windowFuzzer = WindowFuzzer(
@@ -471,6 +483,7 @@ void windowFuzzer(
       orderDependentFunctions,
       timestampPrecision,
       queryConfigs,
+      orderableGroupKeys,
       std::move(referenceQueryRunner));
   planPath.has_value() ? windowFuzzer.go(planPath.value()) : windowFuzzer.go();
 }

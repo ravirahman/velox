@@ -87,19 +87,29 @@ void WaveHiveDataSource::addSplit(
   }
 
   splitReader_ = WaveSplitReader::create(split, params_, defines_);
-  ;
+
   // Split reader subclasses may need to use the reader options in prepareSplit
   // so we initialize it beforehand.
   splitReader_->configureReaderOptions();
   splitReader_->prepareSplit(metadataFilter_, runtimeStats_);
 }
 
-int32_t WaveHiveDataSource::canAdvance() {
-  return splitReader_ != nullptr ? splitReader_->canAdvance() : 0;
+int32_t WaveHiveDataSource::canAdvance(WaveStream& stream) {
+  if (!splitReader_) {
+    return 0;
+  }
+  auto numRows = splitReader_->canAdvance(stream);
+  if (numRows == 0) {
+    split_ = nullptr;
+  }
+  return numRows;
 }
 
 void WaveHiveDataSource::schedule(WaveStream& stream, int32_t maxRows) {
   splitReader_->schedule(stream, maxRows);
+  // The stream must hold the reader tree. 'this' can initiate many
+  // concurrently running streams over potentially multiple splits.
+  stream.setSplitReader(splitReader_);
 }
 
 vector_size_t WaveHiveDataSource::outputSize(WaveStream& stream) const {

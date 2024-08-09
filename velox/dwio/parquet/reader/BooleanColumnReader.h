@@ -25,12 +25,12 @@ class BooleanColumnReader : public dwio::common::SelectiveByteRleColumnReader {
  public:
   using ValueType = bool;
   BooleanColumnReader(
-      const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+      const TypePtr& requestedType,
       std::shared_ptr<const dwio::common::TypeWithId> fileType,
       ParquetParams& params,
       common::ScanSpec& scanSpec)
       : SelectiveByteRleColumnReader(
-            requestedType->type(),
+            requestedType,
             std::move(fileType),
             params,
             scanSpec) {}
@@ -49,7 +49,7 @@ class BooleanColumnReader : public dwio::common::SelectiveByteRleColumnReader {
 
   void read(vector_size_t offset, RowSet rows, const uint64_t* incomingNulls)
       override {
-    readCommon<BooleanColumnReader>(offset, rows, incomingNulls);
+    readCommon<BooleanColumnReader, true>(offset, rows, incomingNulls);
     readOffset_ += rows.back() + 1;
   }
 

@@ -55,10 +55,6 @@ class ExchangeSource : public std::enable_shared_from_this<ExchangeSource> {
   /// threads from issuing the same request.
   virtual bool shouldRequestLocked() = 0;
 
-  virtual bool isRequestPendingLocked() const {
-    return requestPending_;
-  }
-
   struct Response {
     /// Size of the response in bytes. Zero means response didn't contain any
     /// data.
@@ -87,6 +83,12 @@ class ExchangeSource : public std::enable_shared_from_this<ExchangeSource> {
   /// small data (1MB) to be returned.
   virtual folly::SemiFuture<Response> requestDataSizes(
       std::chrono::microseconds maxWait) = 0;
+
+  /// Notifies that the engine needs some time to process already received data
+  /// and may not request more for a while. The implementation may choose to
+  /// release temporary buffers or pause fetching any new data until any of
+  /// the 'request' or 'requestDataSizes' methods are called.
+  virtual void pause() {};
 
   /// Close the exchange source. May be called before all data
   /// has been received and processed. This can happen in case
@@ -139,12 +141,16 @@ class ExchangeSource : public std::enable_shared_from_this<ExchangeSource> {
 
   static std::vector<Factory>& factories();
 
+  ExchangeQueue* testingQueue() const {
+    return queue_.get();
+  }
+
  protected:
   // ID of the task producing data
   const std::string taskId_;
   // Destination number of 'this' on producer
   const int destination_;
-  const std::shared_ptr<ExchangeQueue> queue_;
+  const std::shared_ptr<ExchangeQueue> queue_{nullptr};
   // Holds a shared reference on the memory pool as it might be still possible
   // to be accessed by external components after the query task is destroyed.
   // For instance, in Prestissimo, there might be a pending http request issued

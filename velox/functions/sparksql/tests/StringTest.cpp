@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "velox/common/base/tests/GTestUtils.h"
 #include "velox/functions/sparksql/tests/SparkFunctionBaseTest.h"
 #include "velox/type/Type.h"
 
@@ -66,8 +67,7 @@ TEST_F(StringTest, bitLength) {
 
 TEST_F(StringTest, bitLengthVarbinary) {
   const auto bitLength = [&](const std::optional<std::string>& arg) {
-    return evaluateOnce<int32_t, std::string>(
-        "bit_length(c0)", {arg}, {VARBINARY()});
+    return evaluateOnce<int32_t>("bit_length(c0)", VARBINARY(), arg);
   };
 
   EXPECT_EQ(bitLength(""), 0);
@@ -170,6 +170,84 @@ TEST_F(StringTest, conv) {
   EXPECT_EQ(conv(" ", 10, 16), std::nullopt);
   EXPECT_EQ(conv("", std::nullopt, 16), std::nullopt);
   EXPECT_EQ(conv("", 10, std::nullopt), std::nullopt);
+}
+
+TEST_F(StringTest, levenshtein) {
+  const auto levenshtein = [&](const std::optional<std::string>& left,
+                               const std::optional<std::string>& right,
+                               const std::optional<int32_t>& threshold =
+                                   std::nullopt) {
+    if (threshold.has_value()) {
+      return evaluateOnce<int32_t>(
+          "levenshtein(c0, c1, c2)", left, right, threshold);
+    }
+    return evaluateOnce<int32_t>("levenshtein(c0, c1)", left, right);
+  };
+
+  EXPECT_EQ(levenshtein("abc", "abc"), 0);
+  EXPECT_EQ(levenshtein("kitten", "sitting"), 3);
+  EXPECT_EQ(levenshtein("frog", "fog"), 1);
+  EXPECT_EQ(levenshtein("", "hello"), 5);
+  EXPECT_EQ(levenshtein("hello", ""), 5);
+  EXPECT_EQ(levenshtein("hello", "hello"), 0);
+  EXPECT_EQ(levenshtein("hello", "olleh"), 4);
+  EXPECT_EQ(levenshtein("hello world", "hello"), 6);
+  EXPECT_EQ(levenshtein("hello", "hello world"), 6);
+  EXPECT_EQ(levenshtein("hello world", "hel wold"), 3);
+  EXPECT_EQ(levenshtein("hello world", "hellq wodld"), 2);
+  EXPECT_EQ(levenshtein("hello word", "dello world"), 2);
+  EXPECT_EQ(levenshtein("  facebook  ", "  facebook  "), 0);
+  EXPECT_EQ(levenshtein("hello", std::string(100000, 'h')), 99999);
+  EXPECT_EQ(levenshtein(std::string(100000, 'l'), "hello"), 99998);
+  EXPECT_EQ(levenshtein(std::string(1000001, 'h'), ""), 1000001);
+  EXPECT_EQ(levenshtein("", std::string(1000001, 'h')), 1000001);
+  EXPECT_EQ(levenshtein("千世", "fog"), 3);
+  EXPECT_EQ(levenshtein("世界千世", "大a界b"), 4);
+
+  EXPECT_EQ(levenshtein("kitten", "sitting", 2), -1);
+
+  EXPECT_EQ(levenshtein("", "", 0), 0);
+
+  EXPECT_EQ(levenshtein("aaapppp", "", 8), 7);
+  EXPECT_EQ(levenshtein("aaapppp", "", 7), 7);
+  EXPECT_EQ(levenshtein("aaapppp", "", 6), -1);
+
+  EXPECT_EQ(levenshtein("elephant", "hippo", 7), 7);
+  EXPECT_EQ(levenshtein("elephant", "hippo", 6), -1);
+  EXPECT_EQ(levenshtein("hippo", "elephant", 7), 7);
+  EXPECT_EQ(levenshtein("hippo", "elephant", 6), -1);
+
+  EXPECT_EQ(levenshtein("b", "a", 0), -1);
+  EXPECT_EQ(levenshtein("a", "b", 0), -1);
+
+  EXPECT_EQ(levenshtein("aa", "aa", 0), 0);
+  EXPECT_EQ(levenshtein("aa", "aa", 2), 0);
+
+  EXPECT_EQ(levenshtein("aaa", "bbb", 2), -1);
+  EXPECT_EQ(levenshtein("aaa", "bbb", 3), 3);
+
+  EXPECT_EQ(levenshtein("aaaaaa", "b", 10), 6);
+
+  EXPECT_EQ(levenshtein("aaapppp", "b", 8), 7);
+  EXPECT_EQ(levenshtein("a", "bbb", 4), 3);
+
+  EXPECT_EQ(levenshtein("aaapppp", "b", 7), 7);
+  EXPECT_EQ(levenshtein("a", "bbb", 3), 3);
+
+  EXPECT_EQ(levenshtein("a", "bbb", 2), -1);
+  EXPECT_EQ(levenshtein("bbb", "a", 2), -1);
+  EXPECT_EQ(levenshtein("aaapppp", "b", 6), -1);
+
+  EXPECT_EQ(levenshtein("a", "bbb", 1), -1);
+  EXPECT_EQ(levenshtein("bbb", "a", 1), -1);
+
+  EXPECT_EQ(levenshtein("12345", "1234567", 1), -1);
+  EXPECT_EQ(levenshtein("1234567", "12345", 1), -1);
+
+  EXPECT_EQ(levenshtein("千世", "fog", 3), 3);
+  EXPECT_EQ(levenshtein("千世", "fog", 2), -1);
+  EXPECT_EQ(levenshtein("世界千世", "大a界b", 4), 4);
+  EXPECT_EQ(levenshtein("世界千世", "大a界b", 3), -1);
 }
 
 TEST_F(StringTest, endsWith) {
@@ -282,8 +360,7 @@ TEST_F(StringTest, lengthString) {
 
 TEST_F(StringTest, lengthVarbinary) {
   const auto length = [&](const std::optional<std::string>& arg) {
-    return evaluateOnce<int32_t, std::string>(
-        "length(c0)", {arg}, {VARBINARY()});
+    return evaluateOnce<int32_t>("length(c0)", VARBINARY(), arg);
   };
   EXPECT_EQ(length(""), 0);
   EXPECT_EQ(length(std::string("\0", 1)), 1);
@@ -386,8 +463,7 @@ TEST_F(StringTest, ltrim) {
 
 TEST_F(StringTest, md5) {
   const auto md5 = [&](const std::optional<std::string>& arg) {
-    return evaluateOnce<std::string, std::string>(
-        "md5(c0)", {arg}, {VARBINARY()});
+    return evaluateOnce<std::string>("md5(c0)", VARBINARY(), arg);
   };
   EXPECT_EQ(md5(std::nullopt), std::nullopt);
   EXPECT_EQ(md5(""), "d41d8cd98f00b204e9800998ecf8427e");
@@ -449,6 +525,26 @@ TEST_F(StringTest, overlayVarbinary) {
   EXPECT_EQ(overlay("Spark SQL", "##", 0, 4), "##rk SQL");
   EXPECT_EQ(overlay("Spark SQL", "##", -10, -1), "##park SQL");
   EXPECT_EQ(overlay("Spark SQL", "##", -10, 4), "##rk SQL");
+}
+
+TEST_F(StringTest, repeat) {
+  const auto stringRepeat = [&](const std::optional<std::string>& str,
+                                const std::optional<int32_t>& times) {
+    return evaluateOnce<std::string>(
+        fmt::format("{}(c0, c1)", "repeat"), str, times);
+  };
+
+  EXPECT_EQ(stringRepeat("hh", 2), "hhhh");
+  EXPECT_EQ(stringRepeat("abab", 0), "");
+  EXPECT_EQ(stringRepeat("abab", -1), "");
+  EXPECT_EQ(stringRepeat("", 2), "");
+  EXPECT_EQ(stringRepeat("123\u6570", 2), "123\u6570123\u6570");
+  VELOX_ASSERT_USER_THROW(
+      stringRepeat("hh", 524289),
+      "Result size must be less than or equal to 1048576");
+  VELOX_ASSERT_USER_THROW(
+      stringRepeat(std::string(214749, 'l'), 10000),
+      "integer overflow: 214749 * 10000");
 }
 
 TEST_F(StringTest, replace) {
@@ -570,8 +666,7 @@ TEST_F(StringTest, rtrim) {
 
 TEST_F(StringTest, sha1) {
   const auto sha1 = [&](const std::optional<std::string>& arg) {
-    return evaluateOnce<std::string, std::string>(
-        "sha1(c0)", {arg}, {VARBINARY()});
+    return evaluateOnce<std::string>("sha1(c0)", VARBINARY(), arg);
   };
 
   EXPECT_EQ(sha1(std::nullopt), std::nullopt);
@@ -642,6 +737,44 @@ TEST_F(StringTest, sha2) {
       sha2("0123456789abcdefghijklmnopqrstuvwxyz", 512),
       "95cadc34aa46b9fdef432f62fe5bad8d9f475bfbecf797d5802bb5f2937a85d9"
       "3ce4857a6262b03834c01c610d74cd1215f9a466dc6ad3dd15078e3309a03a6d");
+}
+
+TEST_F(StringTest, soundex) {
+  const auto soundex = [&](const std::optional<std::string>& input) {
+    return evaluateOnce<std::string>("soundex(c0)", input);
+  };
+  EXPECT_EQ(soundex("ZIN"), "Z500");
+  EXPECT_EQ(soundex("SU"), "S000");
+  EXPECT_EQ(soundex("zZ"), "Z000");
+  EXPECT_EQ(soundex("RAGSSEEESSSVEEWE"), "R221");
+  EXPECT_EQ(soundex("Miller"), "M460");
+  EXPECT_EQ(soundex("Peterson"), "P362");
+  EXPECT_EQ(soundex("Peters"), "P362");
+  EXPECT_EQ(soundex("Auerbach"), "A612");
+  EXPECT_EQ(soundex("Uhrbach"), "U612");
+  EXPECT_EQ(soundex("Moskowitz"), "M232");
+  EXPECT_EQ(soundex("Moskovitz"), "M213");
+  EXPECT_EQ(soundex("relyheewsgeessg"), "R422");
+
+  EXPECT_EQ(soundex("Robert"), "R163");
+  EXPECT_EQ(soundex("Rupert"), "R163");
+  EXPECT_EQ(soundex("Rubin"), "R150");
+
+  EXPECT_EQ(soundex("Ashcraft"), "A261");
+  EXPECT_EQ(soundex("Ashcroft"), "A261");
+  EXPECT_EQ(soundex("Aswcraft"), "A261");
+
+  EXPECT_EQ(soundex("Tymczak"), "T522");
+
+  EXPECT_EQ(soundex("Pfister"), "P236");
+
+  EXPECT_EQ(soundex("Honeyman"), "H555");
+
+  EXPECT_EQ(soundex("Tschüss"), "T220");
+
+  EXPECT_EQ(soundex(""), "");
+  EXPECT_EQ(soundex("!!"), "!!");
+  EXPECT_EQ(soundex("测试"), "测试");
 }
 
 TEST_F(StringTest, startsWith) {
@@ -861,6 +994,15 @@ TEST_F(StringTest, trim) {
   EXPECT_EQ(
       trimWithTrimStr("\u6570", "\u6574\u6570 \u6570\u636E!"),
       "\u6574\u6570 \u6570\u636E!");
+}
+
+TEST_F(StringTest, empty2Null) {
+  const auto empty2Null = [&](const std::optional<std::string>& a) {
+    return evaluateOnce<std::string>("empty2null(c0)", a);
+  };
+
+  EXPECT_EQ(empty2Null(""), std::nullopt);
+  EXPECT_EQ(empty2Null("abc"), "abc");
 }
 } // namespace
 } // namespace facebook::velox::functions::sparksql::test

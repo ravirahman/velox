@@ -15,8 +15,11 @@
  */
 #pragma once
 
+#include "folly/CPortability.h"
+
 #include "velox/common/base/CheckedArithmetic.h"
 #include "velox/common/base/Range.h"
+#include "velox/type/FloatingPointUtil.h"
 #include "velox/vector/LazyVector.h"
 
 namespace facebook::velox::aggregate {
@@ -98,7 +101,17 @@ class AggregationHook : public ValueHook {
 };
 
 namespace {
+// Spark's sum function sets Overflow to true and intentionally let the result
+// value be automatically wrapped around when integer overflow happens. Hence,
+// disable undefined behavior sanitizer to not fail on signed integer overflow.
+// The disablement of the sanitizer only affects SumHook that is used for
+// pushdown of sum aggregation functions. It doesn't affect the Presto's sum
+// function that sets Overflow to false because overflow is handled explicitly
+// in checkedPlus.
 template <typename TValue, bool Overflow>
+#if defined(FOLLY_DISABLE_UNDEFINED_BEHAVIOR_SANITIZER)
+FOLLY_DISABLE_UNDEFINED_BEHAVIOR_SANITIZER("signed-integer-overflow")
+#endif
 inline void updateSingleValue(TValue& result, TValue value) {
   if constexpr (
       (std::is_same_v<TValue, int64_t> && Overflow) ||
@@ -219,11 +232,18 @@ class MinMaxHook final : public AggregationHook {
 
   void addValue(vector_size_t row, const void* value) override {
     auto group = findGroup(row);
-    if (clearNull(group) ||
-        (*reinterpret_cast<T*>(group + offset_) >
-         *reinterpret_cast<const T*>(value)) == isMin) {
-      *reinterpret_cast<T*>(group + offset_) =
-          *reinterpret_cast<const T*>(value);
+    T* currPtr = reinterpret_cast<T*>(group + offset_);
+    const T* valPtr = reinterpret_cast<const T*>(value);
+    if constexpr (std::is_floating_point_v<T>) {
+      static const auto isGreater =
+          util::floating_point::NaNAwareGreaterThan<T>{};
+      if (clearNull(group) || isGreater(*currPtr, *valPtr) == isMin) {
+        *currPtr = *valPtr;
+      }
+    } else {
+      if (clearNull(group) || (*currPtr > *valPtr) == isMin) {
+        *currPtr = *valPtr;
+      }
     }
   }
 };

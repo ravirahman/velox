@@ -186,9 +186,7 @@ FOLLY_ALWAYS_INLINE std::ostream& operator<<(
 class HiveInsertTableHandle;
 using HiveInsertTableHandlePtr = std::shared_ptr<HiveInsertTableHandle>;
 
-/**
- * Represents a request for Hive write.
- */
+/// Represents a request for Hive write.
 class HiveInsertTableHandle : public ConnectorInsertTableHandle {
  public:
   HiveInsertTableHandle(
@@ -198,13 +196,16 @@ class HiveInsertTableHandle : public ConnectorInsertTableHandle {
           dwio::common::FileFormat::DWRF,
       std::shared_ptr<HiveBucketProperty> bucketProperty = nullptr,
       std::optional<common::CompressionKind> compressionKind = {},
-      const std::unordered_map<std::string, std::string>& serdeParameters = {})
+      const std::unordered_map<std::string, std::string>& serdeParameters = {},
+      const std::shared_ptr<dwio::common::WriterOptions>& writerOptions =
+          nullptr)
       : inputColumns_(std::move(inputColumns)),
         locationHandle_(std::move(locationHandle)),
         tableStorageFormat_(tableStorageFormat),
         bucketProperty_(std::move(bucketProperty)),
         compressionKind_(compressionKind),
-        serdeParameters_(serdeParameters) {
+        serdeParameters_(serdeParameters),
+        writerOptions_(writerOptions) {
     if (compressionKind.has_value()) {
       VELOX_CHECK(
           compressionKind.value() != common::CompressionKind_MAX,
@@ -235,6 +236,10 @@ class HiveInsertTableHandle : public ConnectorInsertTableHandle {
     return serdeParameters_;
   }
 
+  const std::shared_ptr<dwio::common::WriterOptions>& writerOptions() const {
+    return writerOptions_;
+  }
+
   bool supportsMultiThreading() const override {
     return true;
   }
@@ -245,7 +250,7 @@ class HiveInsertTableHandle : public ConnectorInsertTableHandle {
 
   const HiveBucketProperty* bucketProperty() const;
 
-  bool isInsertTable() const;
+  bool isExistingTable() const;
 
   folly::dynamic serialize() const override;
 
@@ -253,7 +258,7 @@ class HiveInsertTableHandle : public ConnectorInsertTableHandle {
 
   static void registerSerDe();
 
-  std::string toString() const;
+  std::string toString() const override;
 
  private:
   const std::vector<std::shared_ptr<const HiveColumnHandle>> inputColumns_;
@@ -262,6 +267,7 @@ class HiveInsertTableHandle : public ConnectorInsertTableHandle {
   const std::shared_ptr<HiveBucketProperty> bucketProperty_;
   const std::optional<common::CompressionKind> compressionKind_;
   const std::unordered_map<std::string, std::string> serdeParameters_;
+  const std::shared_ptr<dwio::common::WriterOptions> writerOptions_;
 };
 
 /// Parameters for Hive writers.
@@ -378,13 +384,13 @@ struct HiveWriterId {
 
   HiveWriterId() = default;
 
-  explicit HiveWriterId(uint32_t _partitionId)
-      : HiveWriterId(_partitionId, std::nullopt) {}
-
-  HiveWriterId(uint32_t _partitionId, std::optional<uint32_t> _bucketId)
+  HiveWriterId(
+      std::optional<uint32_t> _partitionId,
+      std::optional<uint32_t> _bucketId = std::nullopt)
       : partitionId(_partitionId), bucketId(_bucketId) {}
 
-  /// Returns the special writer id for the un-partitioned table.
+  /// Returns the special writer id for the un-partitioned (and non-bucketed)
+  /// table.
   static const HiveWriterId& unpartitionedId();
 
   std::string toString() const;
@@ -511,6 +517,10 @@ class HiveDataSink : public DataSink {
   // Compute the partition id and bucket id for each row in 'input'.
   void computePartitionAndBucketIds(const RowVectorPtr& input);
 
+  // Get the HiveWriter corresponding to the row
+  // from partitionIds and bucketIds.
+  FOLLY_ALWAYS_INLINE HiveWriterId getWriterId(size_t row) const;
+
   // Computes the number of input rows as well as the actual input row indices
   // to each corresponding (bucketed) partition based on the partition and
   // bucket ids calculated by 'computePartitionAndBucketIds'. The function also
@@ -559,6 +569,7 @@ class HiveDataSink : public DataSink {
   const ConnectorQueryCtx* const connectorQueryCtx_;
   const CommitStrategy commitStrategy_;
   const std::shared_ptr<const HiveConfig> hiveConfig_;
+  const HiveWriterParameters::UpdateMode updateMode_;
   const uint32_t maxOpenWriters_;
   const std::vector<column_index_t> partitionChannels_;
   const std::unique_ptr<PartitionIdGenerator> partitionIdGenerator_;

@@ -69,7 +69,6 @@ void enqueueReads(
   auto& metadataCache = readerBase.getMetadataCache();
   uint64_t offset = stripeStart;
   uint64_t length = 0;
-  uint32_t regions = 0;
   for (const auto& stream : footer.streams()) {
     length = stream.length();
     // If index cache is available, there is no need to read it
@@ -81,7 +80,6 @@ void enqueueReads(
         selector.shouldReadStream(stream.node(), stream.sequence()) &&
         !inMetaCache) {
       input.enqueue({offset, length});
-      regions++;
     }
     offset += length;
   }
@@ -93,7 +91,8 @@ StripeStreamsImpl createAndLoadStripeStreams(
   TestProvider indexProvider;
   StripeStreamsImpl streams{
       readState,
-      selector,
+      &selector,
+      nullptr,
       RowReaderOptions{},
       0,
       StripeStreamsImpl::kUnknownStripeRows,
@@ -289,7 +288,8 @@ TEST_F(StripeStreamTest, zeroLength) {
   ColumnSelector cs{std::dynamic_pointer_cast<const RowType>(type)};
   StripeStreamsImpl streams{
       stripeReadState,
-      cs,
+      &cs,
+      nullptr,
       RowReaderOptions{},
       0,
       StripeStreamsImpl::kUnknownStripeRows,
@@ -498,7 +498,8 @@ TEST_F(StripeStreamTest, readEncryptedStreams) {
   TestProvider provider;
   StripeStreamsImpl streams{
       stripeReadState,
-      selector,
+      &selector,
+      nullptr,
       RowReaderOptions{},
       0,
       StripeStreamsImpl::kUnknownStripeRows,
@@ -585,7 +586,8 @@ TEST_F(StripeStreamTest, schemaMismatch) {
   TestProvider provider;
   StripeStreamsImpl streams{
       stripeReadState,
-      selector,
+      &selector,
+      nullptr,
       RowReaderOptions{},
       0,
       StripeStreamsImpl::kUnknownStripeRows,

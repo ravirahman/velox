@@ -17,6 +17,7 @@
 #include <string>
 
 #include "velox/functions/Registerer.h"
+#include "velox/functions/lib/ArrayShuffle.h"
 #include "velox/functions/lib/Repeat.h"
 #include "velox/functions/prestosql/ArrayConstructor.h"
 #include "velox/functions/prestosql/ArrayFunctions.h"
@@ -59,11 +60,17 @@ inline void registerArrayCombinationsFunctions(const std::string& prefix) {
 }
 
 template <typename T>
+inline void registerArrayCumSumFunction(const std::string& prefix) {
+  registerFunction<ParameterBinder<ArrayCumSumFunction, T>, Array<T>, Array<T>>(
+      {prefix + "array_cum_sum"});
+}
+
+template <typename T>
 inline void registerArrayHasDuplicatesFunctions(const std::string& prefix) {
   registerFunction<
       ParameterBinder<ArrayHasDuplicatesFunction, T>,
       bool,
-      Array<T>>({prefix + "array_has_duplicates"});
+      Array<T>>({prefix + "array_has_duplicates", prefix + "array_has_dupes"});
 }
 
 template <typename T>
@@ -126,6 +133,7 @@ void registerArrayFunctions(const std::string& prefix) {
   VELOX_REGISTER_VECTOR_FUNCTION(udf_array_distinct, prefix + "array_distinct");
   VELOX_REGISTER_VECTOR_FUNCTION(
       udf_array_duplicates, prefix + "array_duplicates");
+  VELOX_REGISTER_VECTOR_FUNCTION(udf_array_duplicates, prefix + "array_dupes");
   VELOX_REGISTER_VECTOR_FUNCTION(
       udf_array_intersect, prefix + "array_intersect");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_array_contains, prefix + "contains");
@@ -135,7 +143,11 @@ void registerArrayFunctions(const std::string& prefix) {
   VELOX_REGISTER_VECTOR_FUNCTION(udf_zip, prefix + "zip");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_zip_with, prefix + "zip_with");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_array_position, prefix + "array_position");
-  VELOX_REGISTER_VECTOR_FUNCTION(udf_array_shuffle, prefix + "shuffle");
+  exec::registerStatefulVectorFunction(
+      prefix + "shuffle",
+      arrayShuffleSignatures(),
+      makeArrayShuffle,
+      getMetadataForArrayShuffle());
 
   VELOX_REGISTER_VECTOR_FUNCTION(udf_array_sort, prefix + "array_sort");
   VELOX_REGISTER_VECTOR_FUNCTION(
@@ -268,6 +280,14 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayCombinationsFunctions<Varchar>(prefix);
   registerArrayCombinationsFunctions<Timestamp>(prefix);
   registerArrayCombinationsFunctions<Date>(prefix);
+
+  registerArrayCumSumFunction<int8_t>(prefix);
+  registerArrayCumSumFunction<int16_t>(prefix);
+  registerArrayCumSumFunction<int32_t>(prefix);
+  registerArrayCumSumFunction<int64_t>(prefix);
+  registerArrayCumSumFunction<int128_t>(prefix);
+  registerArrayCumSumFunction<float>(prefix);
+  registerArrayCumSumFunction<double>(prefix);
 
   registerArrayHasDuplicatesFunctions<int8_t>(prefix);
   registerArrayHasDuplicatesFunctions<int16_t>(prefix);

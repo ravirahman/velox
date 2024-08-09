@@ -8,7 +8,26 @@ Binary Functions
 
 .. function:: from_base64(string) -> varbinary
 
-    Decodes binary data from the base64 encoded ``string``.
+    Decodes a Base64-encoded ``string`` back into its original binary form. 
+    This function is capable of handling both fully padded and non-padded Base64 encoded strings. 
+    Partially padded Base64 strings are not supported and will result in an error.
+
+    Examples
+    --------
+    Query with padded Base64 string:
+    ::
+        SELECT from_base64('SGVsbG8gV29ybGQ='); -- [72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]
+
+    Query with non-padded Base64 string:
+    ::
+        SELECT from_base64('SGVsbG8gV29ybGQ'); -- [72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]
+
+    Query with partial-padded Base64 string:
+    ::
+        SELECT from_base64('SGVsbG8gV29ybGQgZm9yIHZlbG94IQ='); -- Error : Base64::decode() - invalid input string: string length is not a multiple of 4.
+
+    In the above examples, both the fully padded and non-padded Base64 strings ('SGVsbG8gV29ybGQ=' and 'SGVsbG8gV29ybGQ') decode to the binary representation of the text 'Hello World'.
+    While, partial-padded Base64 string 'SGVsbG8gV29ybGQgZm9yIHZlbG94IQ=' will lead to an velox error.
 
 .. function:: from_base64url(string) -> varbinary
 
@@ -56,10 +75,30 @@ Binary Functions
 
     Returns the length of ``binary`` in bytes.
 
+.. function:: lpad(binary, size, padbinary) -> varbinary
+    :noindex:
+    
+    Left pads ``binary`` to ``size`` bytes with ``padbinary``.
+    If ``size`` is less than the length of ``binary``, the result is
+    truncated to ``size`` characters. ``size`` must not be negative
+    and ``padbinary`` must be non-empty. ``size`` has a maximum value of 1 MiB.
+    In the case of ``size`` being smaller than the length of ``binary``, 
+    ``binary`` will be truncated from the right to fit the ``size``.
+
 .. function:: md5(binary) -> varbinary
 
     Computes the md5 hash of ``binary``.
 
+.. function:: rpad(binary, size, padbinary) -> varbinary
+    :noindex:
+
+    Right pads ``binary`` to ``size`` bytes with ``padbinary``.
+    If ``size`` is less than the length of ``binary``, the result is
+    truncated to ``size`` characters. ``size`` must not be negative
+    and ``padbinary`` must be non-empty. ``size`` has a maximum value of 1 MiB.
+    In the case of ``size`` being smaller than the length of ``binary``, 
+    ``binary`` will be truncated from the right to fit the ``size``.
+    
 .. function:: sha1(binary) -> varbinary
 
     Computes the SHA-1 hash of ``binary``.

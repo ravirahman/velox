@@ -251,6 +251,11 @@ class QueryConfig {
   static constexpr const char* kSpillWriteBufferSize =
       "spill_write_buffer_size";
 
+  /// Specifies the buffer size in bytes to read from one spilled file. If the
+  /// underlying filesystem supports async read, we do read-ahead with double
+  /// buffering, which doubles the buffer used to read from each spill file.
+  static constexpr const char* kSpillReadBufferSize = "spill_read_buffer_size";
+
   /// Config used to create spill files. This config is provided to underlying
   /// file system and the config is free form. The form should be defined by the
   /// underlying file system.
@@ -283,10 +288,6 @@ class QueryConfig {
   /// If true, array_agg() aggregation function will ignore nulls in the input.
   static constexpr const char* kPrestoArrayAggIgnoreNulls =
       "presto.array_agg.ignore_nulls";
-
-  /// If false, size function returns null for null input.
-  static constexpr const char* kSparkLegacySizeOfNull =
-      "spark.legacy_size_of_null";
 
   // The default number of expected items for the bloomfilter.
   static constexpr const char* kSparkBloomFilterExpectedNumItems =
@@ -353,6 +354,15 @@ class QueryConfig {
   /// limit.
   static constexpr const char* kDriverCpuTimeSliceLimitMs =
       "driver_cpu_time_slice_limit_ms";
+
+  /// Maximum number of bytes to use for the normalized key in prefix-sort. Use
+  /// 0 to disable prefix-sort.
+  static constexpr const char* kPrefixSortNormalizedKeyMaxBytes =
+      "prefixsort_normalized_key_max_bytes";
+
+  /// Minimum number of rows to use prefix-sort. The default value has been
+  /// derived using micro-benchmarking.
+  static constexpr const char* kPrefixSortMinRows = "prefixsort_min_rows";
 
   uint64_t queryMaxMemoryPerNode() const {
     return toCapacity(
@@ -588,6 +598,11 @@ class QueryConfig {
     return get<uint64_t>(kSpillWriteBufferSize, 1L << 20);
   }
 
+  uint64_t spillReadBufferSize() const {
+    // The default read buffer size set to 1MB.
+    return get<uint64_t>(kSpillReadBufferSize, 1L << 20);
+  }
+
   std::string spillFileCreateConfig() const {
     return get<std::string>(kSpillFileCreateConfig, "");
   }
@@ -611,11 +626,6 @@ class QueryConfig {
   int32_t spillableReservationGrowthPct() const {
     constexpr int32_t kDefaultPct = 10;
     return get<int32_t>(kSpillableReservationGrowthPct, kDefaultPct);
-  }
-
-  bool sparkLegacySizeOfNull() const {
-    constexpr bool kDefault{true};
-    return get<bool>(kSparkLegacySizeOfNull, kDefault);
   }
 
   bool prestoArrayAggIgnoreNulls() const {
@@ -708,6 +718,14 @@ class QueryConfig {
 
   uint32_t driverCpuTimeSliceLimitMs() const {
     return get<uint32_t>(kDriverCpuTimeSliceLimitMs, 0);
+  }
+
+  int64_t prefixSortNormalizedKeyMaxBytes() const {
+    return get<int64_t>(kPrefixSortNormalizedKeyMaxBytes, 128);
+  }
+
+  int32_t prefixSortMinRows() const {
+    return get<int32_t>(kPrefixSortMinRows, 130);
   }
 
   template <typename T>

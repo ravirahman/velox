@@ -21,7 +21,6 @@
 
 #include "velox/exec/fuzzer/AggregationFuzzerOptions.h"
 #include "velox/exec/fuzzer/AggregationFuzzerRunner.h"
-#include "velox/exec/fuzzer/DuckQueryRunner.h"
 #include "velox/exec/fuzzer/PrestoQueryRunner.h"
 #include "velox/exec/fuzzer/TransformResultVerifier.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
@@ -31,6 +30,7 @@
 #include "velox/functions/prestosql/fuzzer/ApproxPercentileResultVerifier.h"
 #include "velox/functions/prestosql/fuzzer/ArbitraryResultVerifier.h"
 #include "velox/functions/prestosql/fuzzer/MapUnionSumInputGenerator.h"
+#include "velox/functions/prestosql/fuzzer/MinMaxByResultVerifier.h"
 #include "velox/functions/prestosql/fuzzer/MinMaxInputGenerator.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/functions/prestosql/window/WindowFunctionsRegistration.h"
@@ -102,6 +102,7 @@ int main(int argc, char** argv) {
   facebook::velox::functions::prestosql::registerAllScalarFunctions();
   facebook::velox::window::prestosql::registerAllWindowFunctions();
   facebook::velox::functions::prestosql::registerInternalFunctions();
+  facebook::velox::aggregate::prestosql::registerInternalAggregateFunctions();
   facebook::velox::memory::MemoryManager::initialize({});
 
   size_t initialSeed = FLAGS_seed == 0 ? std::time(nullptr) : FLAGS_seed;
@@ -110,6 +111,7 @@ int main(int argc, char** argv) {
   static const std::unordered_set<std::string> skipFunctions = {
       // Skip internal functions used only for result verifications.
       "$internal$count_distinct",
+      "$internal$array_agg",
       // https://github.com/facebookincubator/velox/issues/3493
       "stddev_pop",
       // Lambda functions are not supported yet.
@@ -117,14 +119,20 @@ int main(int argc, char** argv) {
       "max_data_size_for_stats",
       "map_union_sum",
       "approx_set",
-      "min_by",
-      "max_by",
       "any_value",
+      // Presto 0.288 makes set_agg and set_union not respect order-by on
+      // inputs. Presto 0.289
+      // re-enables the order-by for them. So skip these two functions until we
+      // compare
+      // Velox result against Presto 0.289 or later versions.
+      "set_agg",
+      "set_union",
   };
 
   using facebook::velox::exec::test::ApproxDistinctResultVerifier;
   using facebook::velox::exec::test::ApproxPercentileResultVerifier;
   using facebook::velox::exec::test::ArbitraryResultVerifier;
+  using facebook::velox::exec::test::MinMaxByResultVerifier;
   using facebook::velox::exec::test::setupReferenceQueryRunner;
   using facebook::velox::exec::test::TransformResultVerifier;
 
@@ -161,8 +169,8 @@ int main(int argc, char** argv) {
           {"map_agg", makeMapVerifier()},
           {"map_union", makeMapVerifier()},
           {"map_union_sum", makeMapVerifier()},
-          {"max_by", nullptr},
-          {"min_by", nullptr},
+          {"max_by", std::make_shared<MinMaxByResultVerifier>(false)},
+          {"min_by", std::make_shared<MinMaxByResultVerifier>(true)},
           {"multimap_agg",
            TransformResultVerifier::create(
                "transform_values({}, (k, v) -> \"$internal$canonicalize\"(v))")},

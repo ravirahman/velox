@@ -18,8 +18,10 @@
 #include "velox/functions/Registerer.h"
 #include "velox/functions/lib/MapConcat.h"
 #include "velox/functions/prestosql/MapNormalize.h"
+#include "velox/functions/prestosql/MapRemoveNullValues.h"
 #include "velox/functions/prestosql/MapSubset.h"
 #include "velox/functions/prestosql/MapTopN.h"
+#include "velox/functions/prestosql/MapTopNKeys.h"
 #include "velox/functions/prestosql/MultimapFromEntries.h"
 
 namespace facebook::velox::functions {
@@ -59,6 +61,13 @@ void registerMapSubset(const std::string& prefix) {
       Array<Generic<T1>>>({prefix + "map_subset"});
 }
 
+void registerMapRemoveNullValues(const std::string& prefix) {
+  registerFunction<
+      MapRemoveNullValues,
+      Map<Generic<T1>, Generic<T2>>,
+      Map<Generic<T1>, Generic<T2>>>({prefix + "map_remove_null_values"});
+}
+
 } // namespace
 
 void registerMapFunctions(const std::string& prefix) {
@@ -92,11 +101,19 @@ void registerMapFunctions(const std::string& prefix) {
 
   registerFunction<
       MapTopNFunction,
-      Map<Generic<T1>, Orderable<T2>>,
-      Map<Generic<T1>, Orderable<T2>>,
+      Map<Orderable<T1>, Orderable<T2>>,
+      Map<Orderable<T1>, Orderable<T2>>,
       int64_t>({prefix + "map_top_n"});
 
+  registerFunction<
+      MapTopNKeysFunction,
+      Array<Orderable<T1>>,
+      Map<Orderable<T1>, Orderable<T2>>,
+      int64_t>({prefix + "map_top_n_keys"});
+
   registerMapSubset(prefix);
+
+  registerMapRemoveNullValues(prefix);
 
   registerFunction<
       MapNormalizeFunction,

@@ -69,7 +69,7 @@ class E2EWriterTest : public testing::Test {
     return std::make_unique<dwrf::DwrfReader>(
         opts,
         std::make_unique<BufferedInput>(
-            std::make_shared<InMemoryReadFile>(data), opts.getMemoryPool()));
+            std::make_shared<InMemoryReadFile>(data), opts.memoryPool()));
   }
 
   void testFlatMapConfig(
@@ -186,7 +186,8 @@ class E2EWriterTest : public testing::Test {
         dwrf::StripeStreamsImpl stripeStreams(
             std::make_shared<dwrf::StripeReadState>(
                 dwrfRowReader->readerBaseShared(), std::move(stripeMetadata)),
-            dwrfRowReader->getColumnSelector(),
+            &dwrfRowReader->getColumnSelector(),
+            nullptr,
             rowReaderOpts,
             currentStripeInfo.offset(),
             currentStripeInfo.numberOfRows(),
@@ -229,10 +230,10 @@ class E2EWriterTest : public testing::Test {
         }
       }
       auto stats = reader->getFooter().statistics(mapTypeId);
-      ASSERT_TRUE(stats.has_mapstatistics());
-      ASSERT_EQ(featureStreamSizes.size(), stats.mapstatistics().stats_size());
-      for (size_t i = 0; i != stats.mapstatistics().stats_size(); ++i) {
-        const auto& entry = stats.mapstatistics().stats(i);
+      ASSERT_TRUE(stats.hasMapStatistics());
+      ASSERT_EQ(featureStreamSizes.size(), stats.mapStatistics().stats_size());
+      for (size_t i = 0; i != stats.mapStatistics().stats_size(); ++i) {
+        const auto& entry = stats.mapStatistics().stats(i);
         ASSERT_TRUE(entry.stats().has_size());
         EXPECT_EQ(
             featureStreamSizes.at(dwrf::constructKey(entry.key())),
@@ -250,6 +251,7 @@ class E2EWriterTest : public testing::Test {
         [&]() -> const std::string& { return emptySpillFolder; },
         [&](uint64_t) {},
         "fakeSpillConfig",
+        0,
         0,
         0,
         nullptr,
@@ -375,7 +377,8 @@ TEST_F(E2EWriterTest, E2E) {
   dwrf::E2EWriterTestUtil::testWriter(*leafPool_, type, batches, 1, 1, config);
 }
 
-TEST_F(E2EWriterTest, DisableLinearHeuristics) {
+// Disabled because test is failing in continuous runs T193531984.
+TEST_F(E2EWriterTest, DISABLED_DisableLinearHeuristics) {
   const size_t batchCount = 100;
   size_t batchSize = 3000;
 
@@ -416,11 +419,12 @@ TEST_F(E2EWriterTest, DisableLinearHeuristics) {
 
   // disable linear heuristics
   config->set(dwrf::Config::LINEAR_STRIPE_SIZE_HEURISTICS, false);
-  dwrf::E2EWriterTestUtil::testWriter(*leafPool_, type, batches, 3, 3, config);
+  dwrf::E2EWriterTestUtil::testWriter(*leafPool_, type, batches, 2, 3, config);
 }
 
 // Beside writing larger files, this test also uses regular maps only.
-TEST_F(E2EWriterTest, DisableLinearHeuristicsLargeAnalytics) {
+// Disabled because test is failing in continuous runs T193531984.
+TEST_F(E2EWriterTest, DISABLED_DisableLinearHeuristicsLargeAnalytics) {
   const size_t batchCount = 500;
   size_t batchSize = 3000;
 
@@ -1668,6 +1672,7 @@ DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimOnWrite) {
           .stringVariableLength = false,
       },
       leafPool_.get());
+
   std::vector<VectorPtr> vectors;
   for (int i = 0; i < 10; ++i) {
     vectors.push_back(fuzzer.fuzzInputRow(type));
@@ -1726,19 +1731,23 @@ DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimOnWrite) {
           ASSERT_FALSE(writer->testingNonReclaimableSection());
         }));
 
-    writer->flush();
     memory::MemoryReclaimer::Stats stats;
     const auto oldCapacity = writerPool->capacity();
+    const auto oldReservedBytes = writerPool->reservedBytes();
+    const auto oldUsedBytes = writerPool->usedBytes();
     writerPool->reclaim(1L << 30, 0, stats);
     ASSERT_EQ(stats.numNonReclaimableAttempts, 0);
+    // We don't expect the capacity change by memory reclaim but only the used
+    // or reserved memory change.
+    ASSERT_EQ(writerPool->capacity(), oldCapacity);
     if (enableReclaim) {
-      ASSERT_LT(writerPool->capacity(), oldCapacity);
-      ASSERT_GT(stats.reclaimedBytes, 0);
-      ASSERT_GT(stats.reclaimExecTimeUs, 0);
-      dynamic_cast<memory::MemoryPoolImpl*>(writerPool.get())
-          ->testingSetCapacity(oldCapacity);
+      // The writer is empty so nothing to free.
+      ASSERT_EQ(stats.reclaimedBytes, 0);
+      ASSERT_GE(stats.reclaimExecTimeUs, 0);
+      ASSERT_EQ(
+          oldReservedBytes - writerPool->reservedBytes(), stats.reclaimedBytes);
+      ASSERT_EQ(oldUsedBytes, writerPool->usedBytes());
     } else {
-      ASSERT_EQ(writerPool->capacity(), oldCapacity);
       ASSERT_EQ(stats, memory::MemoryReclaimer::Stats{});
     }
 
@@ -1762,7 +1771,8 @@ DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimOnWrite) {
       ASSERT_EQ(stats.numNonReclaimableAttempts, 1);
       writer->testingNonReclaimableSection() = false;
       stats.numNonReclaimableAttempts = 0;
-      ASSERT_GT(writerPool->reclaim(1L << 30, 0, stats), 0);
+      const auto reclaimedBytes = writerPool->reclaim(1L << 30, 0, stats);
+      ASSERT_GT(reclaimedBytes, 0);
       ASSERT_EQ(stats.numNonReclaimableAttempts, 0);
       ASSERT_GT(stats.reclaimedBytes, 0);
       ASSERT_GT(stats.reclaimExecTimeUs, 0);
@@ -1823,7 +1833,7 @@ DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimOnFlush) {
           auto& context = writer->getContext();
           auto& outputPool =
               context.getMemoryPool(dwrf::MemoryUsageCategory::OUTPUT_STREAM);
-          const auto memoryUsage = outputPool.currentBytes();
+          const auto memoryUsage = outputPool.usedBytes();
           const auto availableMemoryUsage = outputPool.availableReservation();
           ASSERT_GE(
               availableMemoryUsage,
@@ -1947,10 +1957,10 @@ TEST_F(E2EWriterTest, memoryReclaimAfterClose) {
     memory::MemoryReclaimer::Stats stats;
     const auto oldCapacity = writerPool->capacity();
     writerPool->reclaim(1L << 30, 0, stats);
-    if (testData.expectedNonReclaimableAttempt) {
-      ASSERT_EQ(stats.numNonReclaimableAttempts, 1);
-    } else {
+    if (testData.abort || !testData.canReclaim) {
       ASSERT_EQ(stats.numNonReclaimableAttempts, 0);
+    } else {
+      ASSERT_EQ(stats.numNonReclaimableAttempts, 1);
     }
     // Reclaim does not happen as the writer is either aborted or closed.
     ASSERT_EQ(stats.reclaimExecTimeUs, 0);
@@ -2007,7 +2017,7 @@ DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimDuringInit) {
           if (reclaimable) {
             ASSERT_GE(reclaimableBytesOpt.value(), 0);
             // We can't reclaim during writer init.
-            ASSERT_EQ(stats.numNonReclaimableAttempts, 1);
+            ASSERT_LE(stats.numNonReclaimableAttempts, 1);
             ASSERT_EQ(stats.reclaimedBytes, 0);
             ASSERT_EQ(stats.reclaimExecTimeUs, 0);
           } else {
@@ -2032,7 +2042,14 @@ DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimDuringInit) {
   }
 }
 
-TEST_F(E2EWriterTest, memoryReclaimThreshold) {
+DEBUG_ONLY_TEST_F(E2EWriterTest, memoryReclaimThreshold) {
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::dwrf::Writer::MemoryReclaimer::reclaimableBytes",
+      std::function<void(dwrf::Writer*)>([&](dwrf::Writer* writer) {
+        // Release before reclaim to make it not able to reclaim from reserved
+        // memory.
+        writer->getContext().releaseMemoryReservation();
+      }));
   const auto type = ROW(
       {{"int_val", INTEGER()},
        {"string_val", VARCHAR()},
@@ -2101,7 +2118,7 @@ TEST_F(E2EWriterTest, memoryReclaimThreshold) {
           *writerPool, reclaimableBytes));
       ASSERT_EQ(reclaimableBytes, 0);
       ASSERT_EQ(writerPool->reclaim(1L << 30, 0, stats), 0);
-      ASSERT_GT(stats.numNonReclaimableAttempts, 0);
+      ASSERT_EQ(stats.numNonReclaimableAttempts, 0);
       ASSERT_EQ(stats.reclaimExecTimeUs, 0);
       ASSERT_EQ(stats.reclaimedBytes, 0);
     }

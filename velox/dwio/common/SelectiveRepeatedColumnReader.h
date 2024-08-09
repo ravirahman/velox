@@ -24,10 +24,6 @@ namespace facebook::velox::dwio::common {
 // logic for dealing with mapping between enclosing and nested rows.
 class SelectiveRepeatedColumnReader : public SelectiveColumnReader {
  public:
-  bool useBulkPath() const override {
-    return false;
-  }
-
   const std::vector<SelectiveColumnReader*>& children() const override {
     return children_;
   }
@@ -73,8 +69,6 @@ class SelectiveRepeatedColumnReader : public SelectiveColumnReader {
   // in subclasses.
   RowSet applyFilter(RowSet rows);
 
-  void setResultNulls(BaseVector& result);
-
   BufferPtr allLengthsHolder_;
   vector_size_t* allLengths_;
   RowSet nestedRows_;
@@ -91,7 +85,7 @@ class SelectiveRepeatedColumnReader : public SelectiveColumnReader {
 class SelectiveListColumnReader : public SelectiveRepeatedColumnReader {
  public:
   SelectiveListColumnReader(
-      const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+      const TypePtr& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       FormatParams& params,
       velox::common::ScanSpec& scanSpec);
@@ -109,13 +103,12 @@ class SelectiveListColumnReader : public SelectiveRepeatedColumnReader {
 
  protected:
   std::unique_ptr<SelectiveColumnReader> child_;
-  const std::shared_ptr<const dwio::common::TypeWithId> requestedType_;
 };
 
 class SelectiveMapColumnReader : public SelectiveRepeatedColumnReader {
  public:
   SelectiveMapColumnReader(
-      const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
+      const TypePtr& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       FormatParams& params,
       velox::common::ScanSpec& scanSpec);
@@ -134,7 +127,6 @@ class SelectiveMapColumnReader : public SelectiveRepeatedColumnReader {
 
   std::unique_ptr<SelectiveColumnReader> keyReader_;
   std::unique_ptr<SelectiveColumnReader> elementReader_;
-  const std::shared_ptr<const dwio::common::TypeWithId> requestedType_;
 };
 
 } // namespace facebook::velox::dwio::common

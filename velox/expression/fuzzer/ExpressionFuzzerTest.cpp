@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
       "width_bucket",
       // Fuzzer cannot generate valid 'comparator' lambda.
       "array_sort(array(T),constant function(T,T,bigint)) -> array(T)",
+      "split_to_map(varchar,varchar,varchar,function(varchar,varchar,varchar,varchar)) -> map(varchar,varchar)",
       // https://github.com/facebookincubator/velox/issues/8919
       "plus(date,interval year to month) -> date",
       "minus(date,interval year to month) -> date",
@@ -64,6 +65,8 @@ int main(int argc, char** argv) {
       "regexp_extract",
       "regexp_extract_all",
       "regexp_like",
+      "regexp_replace",
+      "regexp_split",
   };
   size_t initialSeed = FLAGS_seed == 0 ? std::time(nullptr) : FLAGS_seed;
   return FuzzerRunner::run(initialSeed, skipFunctions, {{}});

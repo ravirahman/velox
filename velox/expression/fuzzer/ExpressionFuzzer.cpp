@@ -280,6 +280,28 @@ static std::pair<std::string, std::string> splitSignature(
   return {signature, ""};
 }
 
+// Returns if `functionName` is deterministic. Returns true if the function was
+// not found or determinism cannot be established.
+bool isDeterministic(const std::string& functionName) {
+  // We know that the 'cast', 'and', and 'or' special forms are deterministic.
+  // Hard-code them here because they are not real functions and hence cannot
+  // be resolved by the code below.
+  if (functionName == "and" || functionName == "or" ||
+      functionName == "coalesce" || functionName == "if" ||
+      functionName == "switch" || functionName == "cast") {
+    return true;
+  }
+
+  const auto determinism = velox::isDeterministic(functionName);
+  if (!determinism.has_value()) {
+    // functionName must be a special form.
+    LOG(WARNING) << "Unable to determine if '" << functionName
+                 << "' is deterministic or not. Assuming it is.";
+    return true;
+  }
+  return determinism.value();
+}
+
 // Parse the comma separated list of function names, and use it to filter the
 // input signatures.
 static void filterSignatures(
@@ -322,6 +344,15 @@ static void filterSignatures(
       }
     }
   }
+
+  for (auto it = input.begin(); it != input.end();) {
+    if (!isDeterministic(it->first)) {
+      LOG(WARNING) << "Skipping non-deterministic function: " << it->first;
+      it = input.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 static void appendSpecialForms(
@@ -339,32 +370,6 @@ static void appendSpecialForms(
     }
     signatureMap.insert({name, std::move(rawSignatures)});
   }
-}
-
-/// Returns if `functionName` with the given `argTypes` is deterministic.
-/// Returns true if the function was not found or determinism cannot be
-/// established.
-bool isDeterministic(
-    const std::string& functionName,
-    const std::vector<TypePtr>& argTypes) {
-  // We know that the 'cast', 'and', and 'or' special forms are deterministic.
-  // Hard-code them here because they are not real functions and hence cannot
-  // be resolved by the code below.
-  if (functionName == "and" || functionName == "or" ||
-      functionName == "coalesce" || functionName == "if" ||
-      functionName == "switch" || functionName == "cast") {
-    return true;
-  }
-
-  if (auto typeAndMetadata =
-          resolveFunctionWithMetadata(functionName, argTypes)) {
-    return typeAndMetadata->second.deterministic;
-  }
-
-  // functionName must be a special form.
-  LOG(WARNING) << "Unable to determine if '" << functionName
-               << "' is deterministic or not. Assuming it is.";
-  return true;
 }
 
 std::optional<CallableSignature> processConcreteSignature(
@@ -567,13 +572,20 @@ ExpressionFuzzer::ExpressionFuzzer(
         continue;
       }
 
-      // Determine a list of concrete argument types that can bind to the
-      // signature. For non-parameterized signatures, these argument types will
-      // be used to create a callable signature. For parameterized signatures,
-      // these argument types are only used to fetch the function instance to
-      // get their determinism.
-      std::vector<TypePtr> argTypes;
-      if (signature->variables().empty()) {
+      if (!signature->variables().empty()) {
+        std::unordered_set<std::string> typeVariables;
+        for (const auto& [name, _] : signature->variables()) {
+          typeVariables.insert(name);
+        }
+        atLeastOneSupported = true;
+        ++supportedFunctionSignatures;
+        signatureTemplates_.emplace_back(SignatureTemplate{
+            function.first, signature, std::move(typeVariables)});
+      } else {
+        // Determine a list of concrete argument types that can bind to the
+        // signature. For non-parameterized signatures, these argument types
+        // will be used to create a callable signature.
+        std::vector<TypePtr> argTypes;
         bool supportedSignature = true;
         for (const auto& arg : signature->argumentTypes()) {
           auto resolvedType = SignatureBinder::tryResolveType(arg, {}, {});
@@ -589,37 +601,15 @@ ExpressionFuzzer::ExpressionFuzzer(
                        << function.first << signature->toString();
           continue;
         }
-      } else {
-        ArgumentTypeFuzzer typeFuzzer{*signature, localRng};
-        typeFuzzer.fuzzReturnType();
-        VELOX_CHECK_EQ(
-            typeFuzzer.fuzzArgumentTypes(options_.maxNumVarArgs), true);
-        argTypes = typeFuzzer.argumentTypes();
-      }
-      if (!isDeterministic(function.first, argTypes)) {
-        LOG(WARNING) << "Skipping non-deterministic function: "
-                     << function.first << signature->toString();
-        continue;
-      }
-
-      if (!signature->variables().empty()) {
-        std::unordered_set<std::string> typeVariables;
-        for (const auto& [name, _] : signature->variables()) {
-          typeVariables.insert(name);
+        if (auto callableFunction = processConcreteSignature(
+                function.first,
+                argTypes,
+                *signature,
+                options_.enableComplexTypes)) {
+          atLeastOneSupported = true;
+          ++supportedFunctionSignatures;
+          signatures_.emplace_back(*callableFunction);
         }
-        atLeastOneSupported = true;
-        ++supportedFunctionSignatures;
-        signatureTemplates_.emplace_back(SignatureTemplate{
-            function.first, signature, std::move(typeVariables)});
-      } else if (
-          auto callableFunction = processConcreteSignature(
-              function.first,
-              argTypes,
-              *signature,
-              options_.enableComplexTypes)) {
-        atLeastOneSupported = true;
-        ++supportedFunctionSignatures;
-        signatures_.emplace_back(*callableFunction);
       }
     }
 

@@ -76,24 +76,45 @@ class BlockTestStream : public Stream {
       int32_t numBlocks,
       uint8_t** flags,
       int32_t** indices,
-      int32_t* sizes,
-      int64_t* times);
+      int32_t* sizes);
   void testBoolToIndicesNoShared(
       int32_t numBlocks,
       uint8_t** flags,
       int32_t** indices,
       int32_t* sizes,
-      int64_t* times,
       void*);
 
   // Returns the smem size for block size 256 of boolToIndices().
   static int32_t boolToIndicesSize();
 
+  void testBool256ToIndices(
+      int32_t numBlocks,
+      uint8_t** flags,
+      int32_t** indices,
+      int32_t* sizes);
+
+  void testBool256ToIndicesNoShared(
+      int32_t numBlocks,
+      uint8_t** flags,
+      int32_t** indices,
+      int32_t* sizes,
+      void*);
+
+  // Returns the smem size for bool256ToIndices().
+  static int32_t bool256ToIndicesSize();
+
   // calculates the sum over blocks of 256 int64s and returns the result for
   // numbers[i * 256] ... numbers[(i + 1) * 256 - 1] inclusive  in results[i].
   void testSum64(int32_t numBlocks, int64_t* numbers, int64_t* results);
 
+  static int32_t sort16SharedSize();
+
   void testSort16(int32_t numBlocks, uint16_t** keys, uint16_t** values);
+  void testSort16NoShared(
+      int32_t numBlocks,
+      uint16_t** keys,
+      uint16_t** values,
+      char* temp);
 
   void partitionShorts(
       int32_t numBlocks,
@@ -127,11 +148,33 @@ class BlockTestStream : public Stream {
   void updateSum1Atomic(TestingRow* rows, HashRun& run);
   void updateSum1Exch(TestingRow* rows, HashRun& run);
   void updateSum1NoSync(TestingRow* rows, HashRun& run);
-  void updateSum1AtomicCoalesce(TestingRow* rows, HashRun& run);
+  void updateSum1AtomicCoalesceShfl(TestingRow* rows, HashRun& run);
+  void updateSum1AtomicCoalesceShmem(TestingRow* rows, HashRun& run);
   void updateSum1Part(TestingRow* rows, HashRun& run);
   void updateSum1Mtx(TestingRow* rows, HashRun& run);
   void updateSum1MtxCoalesce(TestingRow* rows, HashRun& run);
   void updateSum1Order(TestingRow* rows, HashRun& run);
+
+  static int32_t scatterBitsSize(int32_t blockSize);
+
+  void scatterBits(
+      int32_t numSource,
+      int32_t numTarget,
+      const char* source,
+      const uint64_t* targetMask,
+      char* target,
+      int32_t* temp);
+
+  /// Tests nonNullIndex256 if 'rows' are all consecutive integers and
+  /// nonNullIndex256Sparse otherwise. If the row hits a null in 'nulls' the
+  /// result in indices is -1, therwise it is the index in non null values, i.e.
+  /// the original minus the count of null positions below it.
+  void nonNullIndex(
+      char* nulls,
+      int32_t* rows,
+      int32_t numRows,
+      int32_t* indices,
+      int32_t* temp);
 };
 
 } // namespace facebook::velox::wave

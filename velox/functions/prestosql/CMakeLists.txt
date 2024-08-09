@@ -68,7 +68,6 @@ velox_link_libraries(
   velox_functions_json
   velox_functions_lib
   velox_expression
-  velox_external_md5
   velox_type_tz
   velox_presto_types
   velox_functions_util

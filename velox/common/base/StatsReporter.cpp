@@ -19,12 +19,16 @@
 namespace facebook::velox {
 
 namespace {
-BaseStatsReporter* reporter{nullptr};
+std::unique_ptr<BaseStatsReporter> reporter{nullptr};
 
 }
 
-BaseStatsReporter* & BaseStatsReporter::get_instance() {
-    return reporter;
+void BaseStatsReporter::set_instance(std::unique_ptr<BaseStatsReporter> && new_reporter) {
+    reporter = std::move(new_reporter);
+}
+
+BaseStatsReporter* BaseStatsReporter::get_instance() {
+    return reporter.get();
 }
 
 }

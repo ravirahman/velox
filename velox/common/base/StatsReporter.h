@@ -135,7 +135,8 @@ class BaseStatsReporter {
   virtual void addHistogramMetricValue(folly::StringPiece key, size_t value)
       const = 0;
 
-  static BaseStatsReporter*& get_instance();
+  static void set_instance(std::unique_ptr<BaseStatsReporter> &&);
+  static BaseStatsReporter* get_instance();
   /// Return the aggregated metrics in a serialized string format.
   virtual std::string fetchMetrics() = 0;
 

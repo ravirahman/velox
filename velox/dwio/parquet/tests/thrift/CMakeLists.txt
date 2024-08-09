@@ -19,7 +19,7 @@ add_test(velox_dwio_parquet_thrift_test velox_dwio_parquet_thrift_test)
 target_link_libraries(
   velox_dwio_parquet_thrift_test
   arrow
-  thrift
+  thrift::thrift
   velox_link_libs
   gtest
   gtest_main)

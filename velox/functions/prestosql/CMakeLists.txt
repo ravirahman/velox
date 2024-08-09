@@ -64,6 +64,7 @@ velox_add_library(
 
 velox_link_libraries(
   velox_functions_prestosql_impl
+  md5
   velox_common_hyperloglog
   velox_functions_json
   velox_functions_lib

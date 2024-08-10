@@ -24,7 +24,7 @@ DECLARE_bool(velox_memory_leak_check_enabled);
 
 namespace facebook::velox::memory {
 /// The implementation of MemoryAllocator using malloc.
-class MallocAllocator : public MemoryAllocator {
+class MallocAllocator final : public MemoryAllocator {
  public:
   MallocAllocator(size_t capacity, uint32_t reservationByteLimit);
 

@@ -204,7 +204,7 @@ class SpillWriter {
 /// TODO Usage of ByteInputStream as base class is hacky and just happens to
 /// work. For example, ByteInputStream::size(), seekp(), tellp(),
 /// remainingSize() APIs do not work properly.
-class SpillInputStream : public ByteInputStream {
+class SpillInputStream final : public ByteInputStream {
  public:
   /// Reads from 'input' using 'buffer' for buffering reads.
   SpillInputStream(

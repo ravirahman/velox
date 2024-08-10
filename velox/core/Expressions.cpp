@@ -16,6 +16,8 @@
 #include "velox/core/Expressions.h"
 #include "velox/common/encode/Base64.h"
 #include "velox/vector/VectorSaver.h"
+#include <common/memory/MemoryPool.h>
+#include <stdexcept>
 
 namespace facebook::velox::core {
 
@@ -80,12 +82,13 @@ TypedExprPtr InputTypedExpr::create(const folly::dynamic& obj, void* context) {
 
 folly::dynamic ConstantTypedExpr::serialize() const {
   auto obj = ITypedExpr::serializeBase("ConstantTypedExpr");
-  if (valueVector_) {
-    std::ostringstream out;
-    saveVector(*valueVector_, out);
-    auto serializedValue = out.str();
-    obj["valueVector"] = encoding::Base64::encode(
-        serializedValue.data(), serializedValue.size());
+  if (valueGenerator_) {
+    throw std::runtime_error("Cannot serialize expr with value generator");
+    // std::ostringstream out;
+    // saveVector(*valueVector_, out);
+    // auto serializedValue = out.str();
+    // obj["valueVector"] = encoding::Base64::encode(
+    //     serializedValue.data(), serializedValue.size());
   } else {
     obj["value"] = value_.serialize();
   }
@@ -109,6 +112,8 @@ TypedExprPtr ConstantTypedExpr::create(
   std::istringstream dataStream(serializedData);
 
   auto* pool = static_cast<memory::MemoryPool*>(context);
+
+  auto vec = restoreVector(dataStream, pool);
 
   return std::make_shared<ConstantTypedExpr>(restoreVector(dataStream, pool));
 }

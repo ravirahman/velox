@@ -362,25 +362,24 @@ if(${VELOX_ENABLE_GPU})
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-set(BOOST_INCLUDE_LIBRARIES
-    atomic
-    context
-    date_time
-    filesystem
-    program_options
-    regex
-    system
-    thread)
-
-set_source(Boost)
-resolve_dependency(Boost 1.77.0 COMPONENTS ${BOOST_INCLUDE_LIBRARIES})
+find_package(Boost 1.77.0 COMPONENTS
+atomic
+context
+date_time
+filesystem
+program_options
+regex
+system
+thread
+REQUIRED)
+message("Including boost headers: ${Boost_INCLUDE_DIRS}")
+include_directories("${Boost_INCLUDE_DIRS}")
 
 # Range-v3 will be enable when the codegen code actually lands keeping it here
 # for reference. find_package(range-v3)
 
 set_source(gflags)
-resolve_dependency(gflags COMPONENTS ${VELOX_GFLAGS_TYPE})
+resolve_dependency(gflags)
 if(NOT TARGET gflags::gflags)
   # This is a bit convoluted, but we want to be able to use gflags::gflags as a
   # target even when velox is built as a subproject which uses
@@ -443,8 +442,7 @@ if(${VELOX_BUILD_MINIMAL_WITH_DWIO}
    OR VELOX_ENABLE_GCS)
 
   # Locate or build protobuf.
-  set_source(Protobuf)
-  resolve_dependency(Protobuf CONFIG 3.21.7 REQUIRED)
+  find_package(protobuf CONFIG REQUIRED)
   include_directories(${Protobuf_INCLUDE_DIRS})
 endif()
 
@@ -452,7 +450,6 @@ set_source(simdjson)
 resolve_dependency(simdjson 3.9.3)
 
 # Locate or build folly.
-add_compile_definitions(FOLLY_HAVE_INT128_T=1)
 set_source(folly)
 resolve_dependency(folly)
 
@@ -505,32 +502,6 @@ if(NOT VELOX_BUILD_TEST_UTILS AND NOT VELOX_BUILD_TESTING)
   add_definitions(-DVELOX_DISABLE_GOOGLETEST)
 endif()
 
-# On macOS, search Homebrew for keg-only versions of Bison and Flex. Xcode does
-# not provide new enough versions for us to use.
-if(CMAKE_HOST_SYSTEM_NAME MATCHES "Darwin")
-  execute_process(
-    COMMAND brew --prefix bison
-    RESULT_VARIABLE BREW_BISON
-    OUTPUT_VARIABLE BREW_BISON_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(BREW_BISON EQUAL 0 AND EXISTS "${BREW_BISON_PREFIX}")
-    message(
-      STATUS "Found Bison keg installed by Homebrew at ${BREW_BISON_PREFIX}")
-    set(BISON_EXECUTABLE "${BREW_BISON_PREFIX}/bin/bison")
-  endif()
-
-  execute_process(
-    COMMAND brew --prefix flex
-    RESULT_VARIABLE BREW_FLEX
-    OUTPUT_VARIABLE BREW_FLEX_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(BREW_FLEX EQUAL 0 AND EXISTS "${BREW_FLEX_PREFIX}")
-    message(
-      STATUS "Found Flex keg installed by Homebrew at ${BREW_FLEX_PREFIX}")
-    set(FLEX_EXECUTABLE "${BREW_FLEX_PREFIX}/bin/flex")
-    set(FLEX_INCLUDE_DIR "${BREW_FLEX_PREFIX}/include")
-  endif()
-endif()
 find_package(BISON 3.0.4 REQUIRED)
 find_package(FLEX 2.5.13 REQUIRED)
 find_package(double-conversion 3.1.5 REQUIRED)
@@ -559,6 +530,7 @@ if(VELOX_BUILD_TESTING)
 endif()
 
 include_directories(.)
+add_definitions(-w)
 
 # TODO: Include all other installation files. For now just making sure this
 # generates an installable makefile.

@@ -20,7 +20,7 @@
 
 namespace facebook::velox::exec {
 
-class ArrowStream : public SourceOperator {
+class ArrowStream final : public SourceOperator {
  public:
   ArrowStream(
       int32_t operatorId,

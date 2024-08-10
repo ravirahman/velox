@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <string>
+#include <cstdint>
 
 namespace facebook::velox {
 

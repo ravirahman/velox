@@ -26,6 +26,7 @@
 #include "velox/type/CppToType.h"
 #include "velox/type/TimestampConversion.h"
 #include "velox/type/Type.h"
+#include "velox/type/HugeInt.h"
 
 DECLARE_bool(experimental_enable_legacy_cast);
 

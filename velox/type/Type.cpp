@@ -17,12 +17,10 @@
 #include <velox/type/Type.h>
 
 #include <boost/algorithm/string.hpp>
-#include <fmt/format.h>
+#include <regex>
 #include <folly/Demangle.h>
-#include <re2/re2.h>
+#include <fmt/format.h>
 
-#include <sstream>
-#include <typeindex>
 
 #include "velox/type/TimestampConversion.h"
 
@@ -37,8 +35,8 @@ struct hash<facebook::velox::TypeKind> {
 
 namespace {
 bool isColumnNameRequiringEscaping(const std::string& name) {
-  static const std::string re("^[a-zA-Z_][a-zA-Z0-9_]*$");
-  return !RE2::FullMatch(name, re);
+  static const std::regex pattern("^[a-zA-Z_][a-zA-Z0-9_]*$");
+  return !std::regex_match(name, pattern);
 }
 } // namespace
 

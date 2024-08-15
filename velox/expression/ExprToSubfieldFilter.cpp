@@ -187,8 +187,10 @@ std::unique_ptr<common::Filter> makeLessThanFilter(
       return lessThan(singleValue<int32_t>(upper));
     case TypeKind::BIGINT:
       return lessThan(singleValue<int64_t>(upper));
+#ifdef FOLLY_HAVE_INT128_T
     case TypeKind::HUGEINT:
       return lessThanHugeint(singleValue<int128_t>(upper));
+#endif
     case TypeKind::DOUBLE:
       return lessThanDouble(singleValue<double>(upper));
     case TypeKind::REAL:

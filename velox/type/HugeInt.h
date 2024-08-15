@@ -62,4 +62,5 @@ class HugeInt {
 
 namespace std {
 string to_string(__int128_t x);
+string to_string(__uint128_t x);
 } // namespace std

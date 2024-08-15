@@ -4286,7 +4286,7 @@ class PrestoVectorLexer {
   Status lex(std::vector<Token>& out) && {
     VELOX_RETURN_NOT_OK(lexHeader());
 
-    int32_t numColumns;
+    int32_t numColumns = 0;
     VELOX_RETURN_NOT_OK(lexInt(TokenType::NUM_COLUMNS, &numColumns));
 
     for (int32_t col = 0; col < numColumns; ++col) {
@@ -4334,7 +4334,7 @@ class PrestoVectorLexer {
   Status lexColumEncoding(std::string& out) {
     assertCommitted();
     // Don't use readLengthPrefixedString because it doesn't validate the length
-    int32_t encodingLength;
+    int32_t encodingLength = -1;
     VELOX_RETURN_NOT_OK(lexInt(TokenType::COLUMN_ENCODING, &encodingLength));
     // Control encoding length to avoid large allocations
     VELOX_RETURN_IF(
